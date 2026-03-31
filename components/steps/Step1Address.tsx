@@ -48,6 +48,8 @@ export default function Step1Address({ onSubmit }: Props) {
 
     const initAutocomplete = () => {
       if (!window.google?.maps?.places) return;
+      // Guard: only initialize once
+      if (autocompleteRef.current) return;
 
       autocompleteRef.current = new window.google.maps.places.Autocomplete(
         inputRef.current!,

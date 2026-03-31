@@ -1,199 +1,113 @@
 "use client";
 
 import { useState } from "react";
-import { AddressData, LeadData, ValuationData } from "../HomeValuationFlow";
 
-interface Props {
-  address: AddressData;
-  valuation: ValuationData;
-  onSubmit: (data: LeadData) => void;
+interface Step3LeadGateProps {
+  address: string;
+  onSubmit: (leadData: { email: string }) => void;
 }
 
-export default function Step3LeadGate({ address, valuation, onSubmit }: Props) {
-  const [form, setForm] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-  });
+export default function Step3LeadGate({ address, onSubmit }: Step3LeadGateProps) {
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<Partial<typeof form>>({});
 
   const validate = () => {
-    const errs: Partial<typeof form> = {};
-    if (!form.firstName.trim()) errs.firstName = "Required";
-    if (!form.lastName.trim()) errs.lastName = "Required";
-    if (!form.email.trim() || !/\S+@\S+\.\S+/.test(form.email)) errs.email = "Valid email required";
-    if (!form.phone.trim() || form.phone.replace(/\D/g, "").length < 10)
-      errs.phone = "Valid phone required";
-    return errs;
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Please enter a valid email address");
+      return false;
+    }
+    setError("");
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length) {
-      setErrors(errs);
-      return;
-    }
-
+    if (!validate()) return;
     setLoading(true);
-
     try {
-      // Push lead to GHL
       await fetch("/api/lead", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          address: address.full,
-          city: address.city,
-          state: address.state,
-          zipCode: address.zipCode,
-          estimatedValue: valuation.estimate,
-          valueLow: valuation.low,
-          valueHigh: valuation.high,
-        }),
+        body: JSON.stringify({ email, address }),
       });
-    } catch (err) {
-      console.error("Lead capture error:", err);
-      // Continue even if GHL push fails
-    }
-
+    } catch {}
     setLoading(false);
-    onSubmit(form);
-  };
-
-  const handleChange = (field: keyof typeof form, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
-  };
-
-  const formatPhone = (value: string) => {
-    const digits = value.replace(/\D/g, "").slice(0, 10);
-    if (digits.length <= 3) return digits;
-    if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+    onSubmit({ email });
   };
 
   return (
-    <div className="animate-slide-up">
-      {/* Blurred preview teaser */}
-      <div className="glass rounded-2xl p-6 gold-border mb-4 relative overflow-hidden">
-        <div className="absolute inset-0 backdrop-blur-sm bg-navy/50 flex flex-col items-center justify-center z-10 rounded-2xl">
-          <div className="bg-gold/10 border border-gold/30 rounded-full p-3 mb-3">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#C9A84C" strokeWidth="2">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="text-center">
+        <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gold/20 border border-gold/40 mb-4">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#C9A84C" strokeWidth="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        </div>
+        <h2 className="text-2xl font-bold text-white mb-2">Your estimate is ready!</h2>
+        <p className="text-white/60 text-sm">Enter your email to see your home&apos;s value</p>
+      </div>
+
+      {/* Address preview */}
+      <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex items-center gap-3">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C9A84C" strokeWidth="2" className="shrink-0">
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+          <circle cx="12" cy="10" r="3" />
+        </svg>
+        <p className="text-white/70 text-sm truncate">{address}</p>
+      </div>
+
+      {/* Blurred preview */}
+      <div className="relative rounded-2xl overflow-hidden border border-white/10">
+        <div className="bg-gradient-to-br from-navy-light to-navy p-6 blur-sm pointer-events-none select-none">
+          <p className="text-white/40 text-xs mb-1">Estimated Value</p>
+          <p className="text-3xl font-bold text-gold">$XXX,XXX – $XXX,XXX</p>
+          <div className="flex gap-4 mt-4">
+            <div className="h-12 w-28 bg-white/10 rounded-lg" />
+            <div className="h-12 w-28 bg-white/10 rounded-lg" />
+          </div>
+        </div>
+        <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[2px]">
+          <div className="text-center">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#C9A84C" strokeWidth="2" className="mx-auto mb-2">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
-          </div>
-          <p className="text-gold font-semibold text-sm">Your estimate is ready!</p>
-          <p className="text-white/50 text-xs mt-1">Enter your info below to unlock</p>
-        </div>
-
-        {/* Fake blurred numbers behind */}
-        <div className="opacity-20 select-none pointer-events-none">
-          <p className="text-white/40 text-xs uppercase tracking-widest mb-2">Estimated Value</p>
-          <p className="text-4xl font-bold text-white blur-sm">$492,000 – $531,000</p>
-          <div className="flex gap-2 mt-3">
-            <div className="h-4 w-24 bg-white/20 rounded blur-sm" />
-            <div className="h-4 w-16 bg-white/20 rounded blur-sm" />
+            <p className="text-white text-sm font-medium">Enter email to unlock</p>
           </div>
         </div>
       </div>
 
-      {/* Lead form */}
-      <div className="glass rounded-2xl p-6 md:p-8 gold-border">
-        <div className="text-center mb-6">
-          <h2 className="text-2xl font-bold text-white">Your estimate is ready!</h2>
-          <p className="text-white/50 text-sm mt-2">
-            Enter your info to see your home's value for{" "}
-            <span className="text-gold font-medium">
-              {address.streetNumber} {address.streetName}
-            </span>
-          </p>
+      {/* Email form */}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <input
+            type="email"
+            placeholder="your@email.com"
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); setError(""); }}
+            className={`w-full bg-navy/60 border ${error ? "border-red-400/70" : "border-white/20"} focus:border-gold rounded-xl px-4 py-4 text-white placeholder-white/30 outline-none transition-all focus:ring-2 focus:ring-gold/30 text-base`}
+            autoFocus
+          />
+          {error && <p className="text-red-400 text-xs mt-1 ml-1">{error}</p>}
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <input
-                type="text"
-                placeholder="First Name"
-                value={form.firstName}
-                onChange={(e) => handleChange("firstName", e.target.value)}
-                className={`w-full bg-navy/60 border ${errors.firstName ? "border-red-400/70" : "border-white/20"} focus:border-gold rounded-xl px-4 py-3.5 text-white placeholder-white/30 outline-none transition-all focus:ring-2 focus:ring-gold/30 text-sm`}
-                required
-              />
-              {errors.firstName && (
-                <p className="text-red-400 text-xs mt-1 ml-1">{errors.firstName}</p>
-              )}
-            </div>
-            <div>
-              <input
-                type="text"
-                placeholder="Last Name"
-                value={form.lastName}
-                onChange={(e) => handleChange("lastName", e.target.value)}
-                className={`w-full bg-navy/60 border ${errors.lastName ? "border-red-400/70" : "border-white/20"} focus:border-gold rounded-xl px-4 py-3.5 text-white placeholder-white/30 outline-none transition-all focus:ring-2 focus:ring-gold/30 text-sm`}
-                required
-              />
-              {errors.lastName && (
-                <p className="text-red-400 text-xs mt-1 ml-1">{errors.lastName}</p>
-              )}
-            </div>
-          </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-gold hover:bg-gold/90 disabled:opacity-60 text-navy font-bold py-4 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 text-base shadow-lg shadow-gold/20"
+        >
+          {loading ? (
+            <><span className="w-4 h-4 border-2 border-navy/30 border-t-navy rounded-full animate-spin" /> Processing...</>
+          ) : (
+            <>See My Home Value <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg></>
+          )}
+        </button>
 
-          <div>
-            <input
-              type="email"
-              placeholder="Email Address"
-              value={form.email}
-              onChange={(e) => handleChange("email", e.target.value)}
-              className={`w-full bg-navy/60 border ${errors.email ? "border-red-400/70" : "border-white/20"} focus:border-gold rounded-xl px-4 py-3.5 text-white placeholder-white/30 outline-none transition-all focus:ring-2 focus:ring-gold/30 text-sm`}
-              required
-            />
-            {errors.email && (
-              <p className="text-red-400 text-xs mt-1 ml-1">{errors.email}</p>
-            )}
-          </div>
-
-          <div>
-            <input
-              type="tel"
-              placeholder="Phone Number"
-              value={form.phone}
-              onChange={(e) => handleChange("phone", formatPhone(e.target.value))}
-              className={`w-full bg-navy/60 border ${errors.phone ? "border-red-400/70" : "border-white/20"} focus:border-gold rounded-xl px-4 py-3.5 text-white placeholder-white/30 outline-none transition-all focus:ring-2 focus:ring-gold/30 text-sm`}
-              required
-            />
-            {errors.phone && (
-              <p className="text-red-400 text-xs mt-1 ml-1">{errors.phone}</p>
-            )}
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full gold-gradient text-navy font-bold py-4 rounded-xl text-base transition-all hover:opacity-90 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed shadow-lg shadow-gold/20 mt-1"
-          >
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                </svg>
-                Processing...
-              </span>
-            ) : (
-              "See My Home Value →"
-            )}
-          </button>
-
-          <p className="text-white/30 text-xs text-center mt-3">
-            🔒 Your info is private. No spam, no solicitation — just your results.
-          </p>
-        </form>
-      </div>
+        <p className="text-center text-white/30 text-xs">No spam. Your info is kept private.</p>
+      </form>
     </div>
   );
 }
