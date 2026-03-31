@@ -19,6 +19,11 @@ export const metadata: Metadata = {
   },
 };
 
+// Support both GOOGLE_MAPS_API_KEY (server-side Vercel var) and
+// NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (public var) — whichever is configured.
+const mapsApiKey =
+  process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -26,16 +31,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        {process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY && (
-          <Script
-            src={`https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places`}
-            strategy="beforeInteractive"
-          />
-        )}
-      </head>
       <body className={`${inter.variable} font-sans min-h-screen bg-navy`}>
         {children}
+        {mapsApiKey && (
+          <Script
+            src={`https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&libraries=places`}
+            strategy="afterInteractive"
+          />
+        )}
       </body>
     </html>
   );
