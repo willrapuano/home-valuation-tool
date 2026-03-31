@@ -47,6 +47,41 @@ async function getRepliersAVM(
 ): Promise<{ estimate: number; low: number; high: number; comps: Comp[]; confidence: string; source: string }> {
   const apiKey = process.env.REPLIERS_API_KEY;
 
+  // Try local Mac Mini valuation API first
+  const localApiUrl = process.env.VALUATION_API_URL || "http://127.0.0.1:8765";
+  try {
+    const [streetNumber, ...streetParts] = address.split(" ");
+    const streetName = streetParts.join(" ");
+    const localRes = await fetch(`${localApiUrl}/api/valuation`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": "valuation-api-key-2026",
+      },
+      body: JSON.stringify({
+        address: streetNumber + " " + streetName,
+        city: "Unknown",
+        state: "VA",
+        zip: zipCode,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (localRes.ok) {
+      const data = await localRes.json();
+      return {
+        estimate: data.average || data.low,
+        low: data.low,
+        high: data.high,
+        comps: [],
+        confidence: "medium",
+        source: data.source || "estimate",
+      };
+    }
+  } catch (e) {
+    console.log("Local valuation API unavailable, falling back to Repliers");
+  }
+
   if (!apiKey) {
     return getFallbackEstimate(zipCode, sqft);
   }
