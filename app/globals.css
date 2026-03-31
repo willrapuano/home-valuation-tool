@@ -3,25 +3,98 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --navy: #0B1D3A;
+  --gold: #C9A84C;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--navy);
+  color: white;
+  font-family: var(--font-inter), sans-serif;
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(201, 168, 76, 0.1) 0%,
+      rgba(201, 168, 76, 0.3) 50%,
+      rgba(201, 168, 76, 0.1) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
   }
+
+  .glass {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .gold-border {
+    border: 1px solid rgba(201, 168, 76, 0.3);
+  }
+
+  .gold-gradient {
+    background: linear-gradient(135deg, #C9A84C 0%, #d9bc76 50%, #C9A84C 100%);
+  }
+}
+
+/* Google Places autocomplete dropdown styling */
+.pac-container {
+  background-color: #1a3460 !important;
+  border: 1px solid rgba(201, 168, 76, 0.4) !important;
+  border-radius: 8px !important;
+  margin-top: 4px !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5) !important;
+  font-family: var(--font-inter), sans-serif !important;
+  z-index: 9999 !important;
+}
+
+.pac-item {
+  background-color: #1a3460 !important;
+  color: white !important;
+  padding: 10px 14px !important;
+  border-top: 1px solid rgba(201, 168, 76, 0.15) !important;
+  cursor: pointer !important;
+  font-size: 14px !important;
+}
+
+.pac-item:first-child {
+  border-top: none !important;
+}
+
+.pac-item:hover, .pac-item-selected {
+  background-color: rgba(201, 168, 76, 0.15) !important;
+}
+
+.pac-item-query {
+  color: #C9A84C !important;
+  font-size: 14px !important;
+}
+
+.pac-icon {
+  display: none !important;
+}
+
+.pac-matched {
+  color: #C9A84C !important;
+  font-weight: 600 !important;
+}
+
+/* Hide Google logo in autocomplete */
+.pac-logo::after {
+  display: none !important;
+}
+
+input[type="tel"]::-webkit-inner-spin-button,
+input[type="tel"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
