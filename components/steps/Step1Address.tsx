@@ -230,19 +230,8 @@ export default function Step1Address({ onSubmit }: Props) {
         </div>
       </form>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mt-6">
-        {[
-          { number: "2,400+", label: "Homes Valued" },
-          { number: "$1.2B+", label: "In NoVA Sales" },
-          { number: "18 Yrs", label: "Local Expertise" },
-        ].map((stat) => (
-          <div key={stat.label} className="text-center py-4">
-            <p className="text-gold font-bold text-xl">{stat.number}</p>
-            <p className="text-white/40 text-xs mt-1">{stat.label}</p>
-          </div>
-        ))}
-      </div>
+      {/* Brokerage trust line */}
+      <p className="text-center text-white/40 text-xs mt-6">TTR Sotheby&apos;s International Realty · Northern Virginia</p>
     </div>
   );
 }
