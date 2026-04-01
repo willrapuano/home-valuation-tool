@@ -30,7 +30,7 @@ function slugify(s: string) {
 async function fetchCensusAMI(zip: string): Promise<number | null> {
   try {
     const url = `https://api.census.gov/data/2022/acs/acs5?get=B19013_001E&for=zip+code+tabulation+area:${zip}&key=DEMO_KEY`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(url, {});
     if (!res.ok) return null;
     const data = await res.json();
     // Response format: [["B19013_001E","zip code tabulation area"], ["75000", "22101"]]
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     const zenUrl = `https://api.zenrows.com/v1/?apikey=${ZENROWS_KEY}&url=${encodeURIComponent(zillowUrl)}&js_render=true&premium_proxy=true&wait=5000`;
 
     const [res] = await Promise.all([
-      fetch(zenUrl, { signal: AbortSignal.timeout(35000) }),
+      fetch(zenUrl),
     ]);
 
     areaMedianIncome = await amiPromise;
@@ -159,5 +159,4 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export const runtime = "edge";
 export const maxDuration = 30;
