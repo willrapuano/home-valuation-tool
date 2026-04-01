@@ -42,7 +42,7 @@ function ConfidenceBadge({ confidence }: { confidence: string }) {
 }
 
 export default function Step4Results({ address, valuation, lead, onStartOver }: Props) {
-  const CMA_URL = `mailto:ccurrie@ttrsir.com?subject=${encodeURIComponent(`Free CMA Request — ${address.full}`)}&body=${encodeURIComponent(`Hi Candee,\n\nI'd like to request a free CMA for ${address.full}.\n\nName: ${lead.firstName} ${lead.lastName}\nPhone: ${lead.phone}\n\nThank you!`)}`;
+  const CMA_URL = `mailto:ccurrie@ttrsir.com?subject=${encodeURIComponent(`Free CMA Request — ${address.full}`)}&body=${encodeURIComponent(`Hi Candee,\n\nI'd like to request a free CMA for ${address.full}.\n\nName: ${lead.email}\n\n\nThank you!`)}`;
 
   return (
     <div className="animate-slide-up space-y-4">
@@ -203,7 +203,7 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
             Thinking about selling? Let's talk.
           </p>
           <p className="text-white/50 text-sm mb-4">
-            Hi {lead.firstName}! A free CMA gives you a precise, agent-prepared valuation — often $20,000–$40,000 more accurate than automated estimates.
+            Hi there! A free CMA gives you a precise, agent-prepared valuation — often $20,000–$40,000 more accurate than automated estimates.
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
             <a

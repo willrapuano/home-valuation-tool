@@ -18,10 +18,7 @@ export type AddressData = {
 };
 
 export type LeadData = {
-  firstName: string;
-  lastName: string;
   email: string;
-  phone: string;
 };
 
 export type ValuationData = {
