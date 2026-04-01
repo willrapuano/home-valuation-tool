@@ -36,6 +36,16 @@ export type ValuationData = {
     soldDate: string;
     pricePerSqft?: number;
   }[];
+  streetViewUrl?: string;
+  fmr?: {
+    studio: number;
+    oneBr: number;
+    twoBr: number;
+    threeBr: number;
+    fourBr: number;
+  };
+  areaMedianIncome?: number | null;
+  pricePerSqft?: number | null;
 };
 
 type Step = 1 | 2 | 3 | 4;
