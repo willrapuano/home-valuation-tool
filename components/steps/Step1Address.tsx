@@ -12,8 +12,6 @@ interface Suggestion { place_id: string; display_name: string; address: Record<s
 export default function Step1Address({ onSubmit }: Props) {
   const [value, setValue] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [sqft, setSqft] = useState("");
-  const [showSqft, setShowSqft] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,18 +53,17 @@ export default function Step1Address({ onSubmit }: Props) {
     selectedRef.current = { full, streetNumber, streetName, city, state: stateAbbr, zipCode: zip, lat: parseFloat(s.lat), lng: parseFloat(s.lon) };
     setValue(full);
     setSuggestions([]);
-    setShowSqft(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setSuggestions([]);
-    if (selectedRef.current) { onSubmit(selectedRef.current, sqft ? parseInt(sqft) : undefined); return; }
+    if (selectedRef.current) { onSubmit(selectedRef.current); return; }
     const val = value.trim();
     if (val.length < 10) { setError("Please enter your full address including city and state."); return; }
     const parts = val.split(",").map(s => s.trim());
     const sp = (parts[2] || "").split(" ").filter(Boolean);
-    onSubmit({ full: val, streetNumber: "", streetName: parts[0] || val, city: parts[1] || "", state: sp[0] || "", zipCode: sp[1] || "" }, sqft ? parseInt(sqft) : undefined);
+    onSubmit({ full: val, streetNumber: "", streetName: parts[0] || val, city: parts[1] || "", state: sp[0] || "", zipCode: sp[1] || "" });
   };
 
   return (
