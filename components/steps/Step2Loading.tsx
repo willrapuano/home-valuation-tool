@@ -36,8 +36,11 @@ export default function Step2Loading({ address, sqft, onComplete }: Props) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        address: address.full,
+        address: `${address.streetNumber} ${address.streetName}`.trim() || address.full,
+        city: address.city,
+        state: address.state,
         zipCode: address.zipCode,
+        fullAddress: address.full,
         sqft,
       }),
     }).then(r => r.json());

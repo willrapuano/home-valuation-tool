@@ -68,18 +68,19 @@ function zipFallback(zip: string, address: string, areaMedianIncome: number | nu
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  const { address, zipCode, city, state } = body;
+  const { address, zipCode, city, state, fullAddress: passedFullAddress } = body;
 
   if (!zipCode) return zipFallback("22015", address || "", null);
 
   // Fetch Census AMI in parallel with Zillow scrape
   const amiPromise = fetchCensusAMI(zipCode);
 
-  const fullAddress = [address, city, state, zipCode].filter(Boolean).join(", ");
+  const fullAddress = passedFullAddress || [address, city, state, zipCode].filter(Boolean).join(", ");
   const streetViewUrl = buildStreetViewUrl(fullAddress);
 
-  // Build Zillow URL
-  const slug = [address, city, state, zipCode].map(slugify).filter(Boolean).join("-");
+  // Build Zillow URL — use street only (not full address) to avoid double city/state in slug
+  const streetOnly = (address || "").split(",")[0].trim();
+  const slug = [streetOnly || address, city, state, zipCode].map(slugify).filter(Boolean).join("-");
   const zillowUrl = `https://www.zillow.com/homes/${slug}_rb/`;
 
   let areaMedianIncome: number | null = null;
