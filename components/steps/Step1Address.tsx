@@ -1,91 +1,70 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 
 export type AddressData = {
   full: string; streetNumber: string; streetName: string;
   city: string; state: string; zipCode: string; lat?: number; lng?: number;
 };
 interface Props { onSubmit: (data: AddressData, sqft?: number) => void; }
-interface Suggestion { place_id: string; description: string; }
-declare global { interface Window { google: any; } } // eslint-disable-line
+interface Suggestion { place_id: string; display_name: string; address: Record<string, string>; lat: string; lon: string; }
 
 export default function Step1Address({ onSubmit }: Props) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const svcRef = useRef<any>(null); // eslint-disable-line
-  const geoRef = useRef<any>(null); // eslint-disable-line
-  const timerRef = useRef<any>(null); // eslint-disable-line
+  const [value, setValue] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [selected, setSelected] = useState<AddressData | null>(null);
   const [sqft, setSqft] = useState("");
   const [showSqft, setShowSqft] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedRef = useRef<AddressData | null>(null);
 
-  useEffect(() => {
-    const init = () => {
-      if (!window.google?.maps?.places) return;
-      svcRef.current = new window.google.maps.places.AutocompleteService();
-      geoRef.current = new window.google.maps.Geocoder();
-
-      const el = inputRef.current;
-      if (!el) return;
-
-      el.addEventListener("input", () => {
-        const val = el.value;
-        setSelected(null);
-        setError("");
-        if (timerRef.current) clearTimeout(timerRef.current);
-        if (val.length < 3) { setSuggestions([]); return; }
-        timerRef.current = setTimeout(() => {
-          svcRef.current?.getPlacePredictions(
-            { input: val, types: ["address"], componentRestrictions: { country: "us" } },
-            (r: Suggestion[] | null) => setSuggestions(r || [])
-          );
-        }, 250);
-      });
-    };
-
-    if (window.google?.maps?.places) { init(); return; }
-    const t = setInterval(() => { if (window.google?.maps?.places) { clearInterval(t); init(); } }, 300);
-    return () => clearInterval(t);
+  const fetchSuggestions = useCallback(async (q: string) => {
+    if (q.length < 4) { setSuggestions([]); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=us&q=${encodeURIComponent(q)}`,
+        { headers: { "Accept-Language": "en-US" } }
+      );
+      const data: Suggestion[] = await res.json();
+      // Filter to street-level results
+      setSuggestions(data.filter(d => d.address?.road || d.address?.house_number));
+    } catch { setSuggestions([]); }
+    setLoading(false);
   }, []);
 
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setValue(v);
+    selectedRef.current = null;
+    setError("");
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => fetchSuggestions(v), 400);
+  };
+
   const handleSelect = (s: Suggestion) => {
+    const a = s.address;
+    const streetNumber = a.house_number || "";
+    const streetName = a.road || "";
+    const city = a.city || a.town || a.village || a.suburb || "";
+    const state = a.state || "";
+    const zip = a.postcode || "";
+    const stateAbbr = STATE_ABBR[state] || state.slice(0, 2).toUpperCase();
+    const full = [streetNumber, streetName, city, `${stateAbbr} ${zip}`].filter(Boolean).join(", ").replace(/,\s*,/g, ",");
+    selectedRef.current = { full, streetNumber, streetName, city, state: stateAbbr, zipCode: zip, lat: parseFloat(s.lat), lng: parseFloat(s.lon) };
+    setValue(full);
     setSuggestions([]);
-    if (inputRef.current) inputRef.current.value = s.description;
-    if (!geoRef.current) {
-      setSelected({ full: s.description, streetNumber: "", streetName: s.description, city: "", state: "", zipCode: "" });
-      setShowSqft(true);
-      return;
-    }
-    geoRef.current.geocode({ placeId: s.place_id }, (results: any[]) => { // eslint-disable-line
-      const r = results?.[0];
-      if (!r) return;
-      const get = (type: string, short = false) => {
-        const c = r.address_components?.find((x: any) => x.types.includes(type)); // eslint-disable-line
-        return (short ? c?.short_name : c?.long_name) || "";
-      };
-      const data: AddressData = {
-        full: r.formatted_address || s.description,
-        streetNumber: get("street_number"), streetName: get("route"),
-        city: get("locality") || get("sublocality"),
-        state: get("administrative_area_level_1", true),
-        zipCode: get("postal_code"),
-        lat: r.geometry?.location?.lat?.(), lng: r.geometry?.location?.lng?.(),
-      };
-      if (inputRef.current) inputRef.current.value = r.formatted_address || s.description;
-      setSelected(data);
-      setShowSqft(true);
-    });
+    setShowSqft(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setSuggestions([]);
-    const val = inputRef.current?.value?.trim() || "";
-    if (selected) { onSubmit(selected, sqft ? parseInt(sqft) : undefined); return; }
+    if (selectedRef.current) { onSubmit(selectedRef.current, sqft ? parseInt(sqft) : undefined); return; }
+    const val = value.trim();
     if (val.length < 10) { setError("Please enter your full address including city and state."); return; }
-    const parts = val.split(",").map((s: string) => s.trim());
+    const parts = val.split(",").map(s => s.trim());
     const sp = (parts[2] || "").split(" ").filter(Boolean);
     onSubmit({ full: val, streetNumber: "", streetName: parts[0] || val, city: parts[1] || "", state: sp[0] || "", zipCode: sp[1] || "" }, sqft ? parseInt(sqft) : undefined);
   };
@@ -113,11 +92,21 @@ export default function Step1Address({ onSubmit }: Props) {
                 </svg>
               </div>
               <input
-                id="addr" ref={inputRef} type="text"
+                id="addr"
+                type="text"
+                value={value}
+                onChange={handleChange}
+                onBlur={() => setTimeout(() => setSuggestions([]), 200)}
                 placeholder="123 Main St, McLean, VA 22101"
-                className="w-full bg-navy/60 border border-white/20 focus:border-gold rounded-xl pl-12 pr-4 py-4 text-white placeholder-white/30 outline-none transition-all focus:ring-2 focus:ring-gold/30 text-base"
+                className="w-full bg-navy/60 border border-white/20 focus:border-gold rounded-xl pl-12 pr-10 py-4 text-white placeholder-white/30 outline-none transition-all focus:ring-2 focus:ring-gold/30 text-base"
                 autoComplete="off"
+                spellCheck={false}
               />
+              {loading && (
+                <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                  <div className="w-4 h-4 border-2 border-white/20 border-t-gold rounded-full animate-spin" />
+                </div>
+              )}
               {suggestions.length > 0 && (
                 <ul className="absolute z-50 top-full left-0 right-0 mt-1 bg-[#0d1f3c] border border-white/20 rounded-xl overflow-hidden shadow-xl">
                   {suggestions.map(s => (
@@ -126,14 +115,14 @@ export default function Step1Address({ onSubmit }: Props) {
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C9A84C" strokeWidth="2" className="shrink-0">
                         <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
                       </svg>
-                      {s.description}
+                      <span className="truncate">{s.display_name}</span>
                     </li>
                   ))}
                 </ul>
               )}
             </div>
             {error && <p className="text-red-400 text-xs mt-1 ml-1">{error}</p>}
-            <p className="text-white/30 text-xs mt-2 ml-1">Start typing — suggestions will appear automatically</p>
+            <p className="text-white/30 text-xs mt-2 ml-1">Start typing — suggestions appear after 4 characters</p>
           </div>
 
           {showSqft && (
@@ -157,15 +146,17 @@ export default function Step1Address({ onSubmit }: Props) {
             Get My Home Value →
           </button>
         </div>
-
         <div className="flex items-center justify-center gap-6 mt-6 pt-5 border-t border-white/10">
           <div className="flex items-center gap-1.5 text-white/40 text-xs"><span>🏠</span><span>Real MLS Data</span></div>
           <div className="flex items-center gap-1.5 text-white/40 text-xs"><span>🔒</span><span>100% Private</span></div>
           <div className="flex items-center gap-1.5 text-white/40 text-xs"><span>⚡</span><span>30-Second Results</span></div>
         </div>
       </form>
-
       <p className="text-center text-white/40 text-xs">TTR Sotheby&apos;s International Realty · Northern Virginia</p>
     </div>
   );
 }
+
+const STATE_ABBR: Record<string, string> = {
+  "Alabama":"AL","Alaska":"AK","Arizona":"AZ","Arkansas":"AR","California":"CA","Colorado":"CO","Connecticut":"CT","Delaware":"DE","Florida":"FL","Georgia":"GA","Hawaii":"HI","Idaho":"ID","Illinois":"IL","Indiana":"IN","Iowa":"IA","Kansas":"KS","Kentucky":"KY","Louisiana":"LA","Maine":"ME","Maryland":"MD","Massachusetts":"MA","Michigan":"MI","Minnesota":"MN","Mississippi":"MS","Missouri":"MO","Montana":"MT","Nebraska":"NE","Nevada":"NV","New Hampshire":"NH","New Jersey":"NJ","New Mexico":"NM","New York":"NY","North Carolina":"NC","North Dakota":"ND","Ohio":"OH","Oklahoma":"OK","Oregon":"OR","Pennsylvania":"PA","Rhode Island":"RI","South Carolina":"SC","South Dakota":"SD","Tennessee":"TN","Texas":"TX","Utah":"UT","Vermont":"VT","Virginia":"VA","Washington":"WA","West Virginia":"WV","Wisconsin":"WI","Wyoming":"WY","District of Columbia":"DC"
+};

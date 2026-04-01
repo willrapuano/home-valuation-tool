@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import Script from "next/script";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -20,10 +19,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body className={`${inter.variable} font-sans min-h-screen bg-navy`}>
         {children}
-        <Script
-          src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC-JJ1EHFKypH-RMQaemYKSp2ZrXoGVcP8&libraries=places"
-          strategy="afterInteractive"
-        />
       </body>
     </html>
   );
