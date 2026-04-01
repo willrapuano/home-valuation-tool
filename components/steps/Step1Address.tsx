@@ -125,22 +125,7 @@ export default function Step1Address({ onSubmit }: Props) {
             <p className="text-white/30 text-xs mt-2 ml-1">Start typing — suggestions appear after 4 characters</p>
           </div>
 
-          {showSqft && (
-            <div>
-              <label htmlFor="sqft" className="block text-white/70 text-sm font-medium mb-2">Approximate Sq Ft <span className="text-white/30">(optional)</span></label>
-              <select id="sqft" value={sqft} onChange={e => setSqft(e.target.value)}
-                className="w-full bg-navy/60 border border-white/20 focus:border-gold rounded-xl px-4 py-3.5 text-white outline-none transition-all focus:ring-2 focus:ring-gold/30 text-sm appearance-none">
-                <option value="">Not sure</option>
-                <option value="800">Under 1,000 sqft</option>
-                <option value="1200">1,000 – 1,500 sqft</option>
-                <option value="1750">1,500 – 2,000 sqft</option>
-                <option value="2250">2,000 – 2,500 sqft</option>
-                <option value="2750">2,500 – 3,000 sqft</option>
-                <option value="3500">3,000 – 4,000 sqft</option>
-                <option value="4500">4,000+ sqft</option>
-              </select>
-            </div>
-          )}
+
 
           <button type="submit" className="w-full gold-gradient text-navy font-bold py-4 rounded-xl text-lg transition-all hover:opacity-90 hover:scale-[1.01] active:scale-[0.99] shadow-lg shadow-gold/20 mt-2">
             Get My Home Value →
