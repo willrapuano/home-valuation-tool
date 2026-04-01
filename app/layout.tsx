@@ -1,16 +1,13 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import Script from "next/script";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-});
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
   title: "What's My Home Worth? | Candee Currie | TTR Sotheby's International Realty",
-  description:
-    "Get an instant home value estimate for your Northern Virginia property. Powered by real MLS data. Free, fast, no obligation.",
+  description: "Get an instant home value estimate for your Northern Virginia property. Powered by real MLS data. Free, fast, no obligation.",
   openGraph: {
     title: "What's My Home Worth?",
     description: "Get your instant home value estimate — powered by real MLS data.",
@@ -18,15 +15,15 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
       <body className={`${inter.variable} font-sans min-h-screen bg-navy`}>
         {children}
+        <Script
+          src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC-JJ1EHFKypH-RMQaemYKSp2ZrXoGVcP8&libraries=places"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );
