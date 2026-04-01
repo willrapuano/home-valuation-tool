@@ -101,11 +101,15 @@ export default function Step1Address({ onNext }: Step1AddressProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAddress && inputValue.trim().length > 5) {
-      // Manual entry fallback
-      const parts = inputValue.split(",").map((p) => p.trim());
+    const rawValue = inputRef.current?.value || inputValue;
+    if (selectedAddress) {
+      onNext({ address: selectedAddress, sqft });
+      return;
+    }
+    if (rawValue.trim().length > 5) {
+      const parts = rawValue.split(",").map((p: string) => p.trim());
       const fallback: AddressData = {
-        full: inputValue,
+        full: rawValue,
         streetNumber: "",
         streetName: parts[0] || "",
         city: parts[1] || "",
@@ -113,10 +117,6 @@ export default function Step1Address({ onNext }: Step1AddressProps) {
         zipCode: parts[2]?.split(" ")[1] || "",
       };
       onNext({ address: fallback, sqft });
-      return;
-    }
-    if (selectedAddress) {
-      onNext({ address: selectedAddress, sqft });
     }
   };
 
@@ -151,9 +151,10 @@ export default function Step1Address({ onNext }: Step1AddressProps) {
               id="address"
               ref={inputRef}
               type="text"
-              value={inputValue}
-              onChange={(e) => {
-                setInputValue(e.target.value);
+              defaultValue=""
+              onInput={(e) => {
+                const val = (e.target as HTMLInputElement).value;
+                if (val !== inputValue) setInputValue(val);
                 if (selectedAddress) {
                   setSelectedAddress(null);
                   setIsValid(false);
@@ -201,7 +202,7 @@ export default function Step1Address({ onNext }: Step1AddressProps) {
 
         <button
           type="submit"
-          disabled={!inputValue.trim()}
+          disabled={false}
           className="w-full bg-gold hover:bg-gold/90 disabled:opacity-40 disabled:cursor-not-allowed text-navy font-bold py-4 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 text-base shadow-lg shadow-gold/20"
         >
           Get My Home Value
