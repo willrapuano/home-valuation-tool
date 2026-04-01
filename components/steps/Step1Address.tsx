@@ -14,7 +14,7 @@ interface AddressData {
 }
 
 interface Step1AddressProps {
-  onNext: (data: { address: AddressData; sqft: string }) => void;
+  onSubmit: (data: { address: AddressData; sqft: string }) => void;
 }
 
 declare global {
@@ -103,7 +103,7 @@ export default function Step1Address({ onNext }: Step1AddressProps) {
     e.preventDefault();
     const rawValue = inputRef.current?.value || inputValue;
     if (selectedAddress) {
-      onNext({ address: selectedAddress, sqft });
+      onSubmit({ address: selectedAddress, sqft });
       return;
     }
     if (rawValue.trim().length > 5) {
@@ -116,7 +116,7 @@ export default function Step1Address({ onNext }: Step1AddressProps) {
         state: parts[2]?.split(" ")[0] || "",
         zipCode: parts[2]?.split(" ")[1] || "",
       };
-      onNext({ address: fallback, sqft });
+      onSubmit({ address: fallback, sqft });
     }
   };
 
