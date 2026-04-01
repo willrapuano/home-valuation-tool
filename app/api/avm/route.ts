@@ -114,24 +114,39 @@ export async function POST(req: NextRequest) {
       if (rLow > 50000 && rHigh > rLow) { low = rLow; high = rHigh; }
     }
 
-    // Extract sqft for price/sqft calculation
+    // Extract beds/baths/sqft
+    let beds: number | null = null;
+    let baths: number | null = null;
+    let sqftVal: number | null = null;
     let pricePerSqft: number | null = null;
-    const sqftMatch = html.match(/(\d{1,5})\s*(?:sq\.?\s*ft|sqft|square feet)/i);
+
+    const bedsMatch = html.match(/(\d)\s*(?:bds?|beds?)\b/i);
+    if (bedsMatch) beds = parseInt(bedsMatch[1]);
+
+    const bathsMatch = html.match(/([\d.]+)\s*(?:bas?|baths?)\b/i);
+    if (bathsMatch) baths = parseFloat(bathsMatch[1]);
+
+    const sqftMatch = html.match(/([\d,]+)\s*(?:sq\.?\s*ft|sqft|square\s*feet)/i);
     if (sqftMatch) {
-      const sqft = parseInt(sqftMatch[1]);
-      if (sqft > 200 && sqft < 20000) {
-        pricePerSqft = Math.round(zestimate / sqft);
-      }
+      sqftVal = parseInt(sqftMatch[1].replace(/,/g, ""));
+      if (sqftVal > 200 && sqftVal < 20000) pricePerSqft = Math.round(zestimate / sqftVal);
+      else sqftVal = null;
     }
 
-    // Extract Rent Zestimate
+    // Year built + home type
+    const yrMatch = html.match(/(?:Built in|Year built)[:\s]+(\d{4})/i);
+    const yearBuilt = yrMatch ? parseInt(yrMatch[1]) : null;
+
+    const typeMatch = html.match(/(?:home type|property type)[:\s]+"?([^"<\n,]{3,30})"?/i);
+    const homeType = typeMatch ? typeMatch[1].trim() : null;
+
+    // Rent Zestimate
     let rentZestimate: number | null = null;
     const rentMatches = html.match(/[Rr]ent\s*[Zz]estimate[\s\S]{0,100}\$([\d,]+)/);
     if (rentMatches) {
       const rent = parseInt(rentMatches[1].replace(/,/g, ""));
       if (rent > 500 && rent < 20000) rentZestimate = rent;
     }
-    // Fallback: look for /mo pattern near rent context
     if (!rentZestimate) {
       const rentMoMatch = html.match(/\$([\d,]+)\/mo/);
       if (rentMoMatch) {
@@ -152,6 +167,11 @@ export async function POST(req: NextRequest) {
       areaMedianIncome,
       pricePerSqft,
       rentZestimate,
+      beds,
+      baths,
+      sqft: sqftVal,
+      yearBuilt,
+      homeType,
     });
   } catch (err) {
     console.error("Zillow scrape error:", err);
