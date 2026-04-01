@@ -1,10 +1,7 @@
 {
   "functions": {
-    "app/api/avm/route.ts": {
+    "api/avm": {
       "maxDuration": 60
-    },
-    "app/api/lead/route.ts": {
-      "maxDuration": 15
     }
   }
 }
