@@ -123,6 +123,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Extract Rent Zestimate
+    let rentZestimate: number | null = null;
+    const rentMatches = html.match(/[Rr]ent\s*[Zz]estimate[\s\S]{0,100}\$([\d,]+)/);
+    if (rentMatches) {
+      const rent = parseInt(rentMatches[1].replace(/,/g, ""));
+      if (rent > 500 && rent < 20000) rentZestimate = rent;
+    }
+    // Fallback: look for /mo pattern near rent context
+    if (!rentZestimate) {
+      const rentMoMatch = html.match(/\$([\d,]+)\/mo/);
+      if (rentMoMatch) {
+        const rent = parseInt(rentMoMatch[1].replace(/,/g, ""));
+        if (rent > 500 && rent < 20000) rentZestimate = rent;
+      }
+    }
+
     return NextResponse.json({
       estimate: zestimate,
       low,
@@ -134,6 +150,7 @@ export async function POST(req: NextRequest) {
       fmr: NOVA_FMR,
       areaMedianIncome,
       pricePerSqft,
+      rentZestimate,
     });
   } catch (err) {
     console.error("Zillow scrape error:", err);
@@ -141,3 +158,6 @@ export async function POST(req: NextRequest) {
     return zipFallback(zipCode, fullAddress, areaMedianIncome);
   }
 }
+
+export const runtime = "edge";
+export const maxDuration = 30;

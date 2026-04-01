@@ -46,6 +46,7 @@ export type ValuationData = {
   };
   areaMedianIncome?: number | null;
   pricePerSqft?: number | null;
+  rentZestimate?: number | null;
 };
 
 type Step = 1 | 2 | 3 | 4;

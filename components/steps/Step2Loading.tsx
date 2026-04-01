@@ -10,11 +10,14 @@ interface Props {
 }
 
 const LOADING_STEPS = [
-  { label: "Verifying address...", duration: 600 },
-  { label: "Searching MLS records...", duration: 700 },
-  { label: "Analyzing recent sales...", duration: 800 },
-  { label: "Calculating market trends...", duration: 600 },
-  { label: "Preparing your estimate...", duration: 500 },
+  { label: "Verifying address...", duration: 800 },
+  { label: "Searching MLS records...", duration: 1200 },
+  { label: "Pulling Zillow Zestimate...", duration: 2000 },
+  { label: "Analyzing recent sales...", duration: 2000 },
+  { label: "Calculating rental potential...", duration: 2000 },
+  { label: "Calculating market trends...", duration: 2000 },
+  { label: "Fetching census data...", duration: 2000 },
+  { label: "Preparing your estimate...", duration: 2000 },
 ];
 
 export default function Step2Loading({ address, sqft, onComplete }: Props) {
