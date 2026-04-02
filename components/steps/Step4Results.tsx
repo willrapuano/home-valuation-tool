@@ -38,18 +38,21 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
 
   const midpoint = valuation.estimate;
   const rangeSpread = valuation.high - valuation.low;
-  const midZipEstimate = 750000; // rough NoVA median for % change calc
-  const valueChangePct = ((midpoint - midZipEstimate) / midZipEstimate) * 100;
+  // Use Census AMI for vs-median calc if available, otherwise hide
+  const areaMedian = valuation.areaMedianIncome;
+  // Price-to-income ratio: typical home ~4-5x income. Use 4.5x as proxy for median home value
+  const impliedMedianHomeValue = areaMedian ? areaMedian * 4.5 : null;
+  const valueChangePct = impliedMedianHomeValue
+    ? ((midpoint - impliedMedianHomeValue) / impliedMedianHomeValue) * 100
+    : null;
 
   const fmr = valuation.fmr ?? {
-    studio: 2050,
-    oneBr: 2080,
-    twoBr: 2370,
-    threeBr: 2960,
-    fourBr: 3540,
+    studio: 2050, oneBr: 2080, twoBr: 2370, threeBr: 2960, fourBr: 3540,
   };
 
-  const suggestedRent = fmr.threeBr;
+  // Use Zillow Rent Zestimate if available, otherwise fall back to HUD FMR 3BR
+  const suggestedRent = valuation.rentZestimate || fmr.threeBr;
+  const rentLabel = valuation.rentZestimate ? "Zillow Rent Zestimate" : "3BR HUD FMR";
 
   return (
     <div className="animate-slide-up space-y-6">
@@ -139,16 +142,25 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
         <div className="glass rounded-xl p-4 text-center border border-white/10">
           <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Est. Rent</p>
           <p className="text-white font-bold text-lg">{formatCurrency(suggestedRent)}</p>
-          <p className="text-white/30 text-xs mt-0.5">3BR HUD FMR</p>
+          <p className="text-white/30 text-xs mt-0.5">{rentLabel}</p>
         </div>
 
         {/* Value vs Median */}
         <div className="glass rounded-xl p-4 text-center border border-white/10">
           <p className="text-white/40 text-xs uppercase tracking-wider mb-1">vs. Area Median</p>
-          <p className={`font-bold text-lg ${valueChangePct >= 0 ? "text-green-400" : "text-red-400"}`}>
-            {valueChangePct >= 0 ? "+" : ""}{valueChangePct.toFixed(1)}%
-          </p>
-          <p className="text-white/30 text-xs mt-0.5">from zip median</p>
+          {valueChangePct !== null ? (
+            <>
+              <p className={`font-bold text-lg ${valueChangePct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {valueChangePct >= 0 ? "+" : ""}{valueChangePct.toFixed(1)}%
+              </p>
+              <p className="text-white/30 text-xs mt-0.5">vs. area income median</p>
+            </>
+          ) : (
+            <>
+              <p className="font-bold text-lg text-white/50">N/A</p>
+              <p className="text-white/30 text-xs mt-0.5">data unavailable</p>
+            </>
+          )}
         </div>
       </div>
 
