@@ -142,7 +142,7 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
         <div className="glass rounded-xl p-4 text-center border border-white/10">
           <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Est. Rent</p>
           <p className="text-white font-bold text-lg">{formatCurrency(suggestedRent)}</p>
-          <p className="text-white/30 text-xs mt-0.5">{rentLabel}</p>
+          
         </div>
 
         {/* Value vs Median */}
@@ -221,9 +221,7 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
               <span className="text-white font-semibold text-sm">{address.zipCode}</span>
             </div>
             <div className="flex justify-between items-center py-2">
-              <span className="text-white/50 text-sm">Data Source</span>
               <span className="text-white/70 text-sm">
-                {valuation.source === "zillow" ? "Zillow Zestimate" : "Market Estimate"}
               </span>
             </div>
           </div>
@@ -244,7 +242,6 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
           <div>
             <p className="text-white/50 text-xs uppercase tracking-wider">Suggested Rent</p>
             <p className="text-gold font-bold text-3xl mt-1">{formatCurrency(suggestedRent)}<span className="text-gold/60 text-base font-normal">/mo</span></p>
-            <p className="text-white/40 text-xs mt-1">Based on 3BR HUD Fair Market Rent</p>
           </div>
           <div className="text-right">
             <p className="text-white/40 text-xs">Annual Gross</p>
@@ -286,7 +283,6 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
         )}
 
         <p className="text-white/20 text-xs mt-3">
-          📊 Data source: HUD Fair Market Rents FY2025 · DC-VA-MD Metropolitan Area
         </p>
       </div>
 
