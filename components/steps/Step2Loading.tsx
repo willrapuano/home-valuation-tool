@@ -31,15 +31,23 @@ export default function Step2Loading({ address, sqft, onComplete }: Props) {
     const totalDuration = LOADING_STEPS.reduce((s, step) => s + step.duration, 0);
     let elapsed = 0;
 
+    // Parse city/state/zip from full address if not set
+    const parts = address.full.split(",").map(s => s.trim());
+    const stateParts = (parts[2] || parts[1] || "").trim().split(" ").filter(Boolean);
+    const resolvedCity = address.city || parts[1] || "";
+    const resolvedState = address.state || stateParts[0] || "VA";
+    const resolvedZip = address.zipCode || stateParts[1] || "";
+    const resolvedStreet = (`${address.streetNumber} ${address.streetName}`.trim()) || parts[0] || address.full;
+
     // Fetch valuation data in parallel
     const fetchData = fetch("/api/avm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        address: `${address.streetNumber} ${address.streetName}`.trim() || address.full,
-        city: address.city,
-        state: address.state,
-        zipCode: address.zipCode,
+        address: resolvedStreet,
+        city: resolvedCity,
+        state: resolvedState,
+        zipCode: resolvedZip,
         fullAddress: address.full,
         sqft,
       }),
