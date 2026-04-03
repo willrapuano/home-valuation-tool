@@ -45,30 +45,47 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
   const [imgError, setImgError] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
+  const [reportUrl, setReportUrl] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const handleEmailReport = async () => {
     setEmailLoading(true);
     try {
-      await fetch("/api/email-report", {
+      const res = await fetch("/api/email-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: lead.email,
-          address: address.full,
+          address: address,
           estimate: valuation.estimate,
           low: valuation.low,
           high: valuation.high,
+          confidence: valuation.confidence,
           beds: valuation.beds,
           baths: valuation.baths,
           sqft: valuation.sqft,
           yearBuilt: valuation.yearBuilt,
           rentZestimate: valuation.rentZestimate,
           pricePerSqft: valuation.pricePerSqft,
+          homeType: valuation.homeType,
+          fmr: valuation.fmr,
+          areaMedianIncome: valuation.areaMedianIncome,
         }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (data?.reportUrl) setReportUrl(data.reportUrl);
       setEmailSent(true);
     } catch { setEmailSent(true); } // show success even if API fails
     setEmailLoading(false);
+  };
+
+  const handleCopyLink = async () => {
+    if (!reportUrl) return;
+    try {
+      await navigator.clipboard.writeText(reportUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch { /* ignore */ }
   };
 
   const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${encodeURIComponent(
@@ -176,6 +193,27 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
               Start Over
             </button>
           </div>
+
+          {/* Report URL — shown after email is sent */}
+          {emailSent && reportUrl && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 bg-white/10 rounded-xl px-4 py-3">
+              <span className="text-white/50 text-xs shrink-0">Your report:</span>
+              <a
+                href={reportUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gold text-xs underline underline-offset-2 truncate max-w-[200px] hover:opacity-80 transition-opacity"
+              >
+                {reportUrl.replace("https://", "")}
+              </a>
+              <button
+                onClick={handleCopyLink}
+                className="shrink-0 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold px-3 py-1 rounded-lg text-xs transition-all"
+              >
+                {linkCopied ? "✓ Copied!" : "📋 Copy Link"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
