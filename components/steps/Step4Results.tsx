@@ -11,7 +11,7 @@ interface Props {
   onStartOver: () => void;
 }
 
-const GMAPS_KEY = "AIzaSyC-JJ1EHFKypH-RMQaemYKSp2ZrXoGVcP8";
+const GMAPS_KEY = "AIzaSyBIaGiZ7rhO9ByCpbucA0YeLEp-IP7CndU";
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -88,9 +88,10 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
     } catch { /* ignore */ }
   };
 
-  const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${encodeURIComponent(
-    address.full
-  )}&key=${GMAPS_KEY}`;
+  const svLocation = (valuation as {lat?: number; lng?: number}).lat && (valuation as {lat?: number; lng?: number}).lng
+    ? `${(valuation as {lat?: number}).lat},${(valuation as {lng?: number}).lng}`
+    : encodeURIComponent(address.full);
+  const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${svLocation}&radius=100&key=${GMAPS_KEY}`;
 
   const CMA_SUBJECT = encodeURIComponent(`Free CMA Request — ${address.full}`);
   const CMA_BODY = encodeURIComponent(
