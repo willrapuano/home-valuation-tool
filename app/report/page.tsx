@@ -403,36 +403,7 @@ function ReportContent() {
             </div>
           </div>
 
-          <div className="grid grid-cols-5 gap-2 mb-4">
-            {[
-              { label: "Studio", value: fmr.studio },
-              { label: "1 BR", value: fmr.oneBr },
-              { label: "2 BR", value: fmr.twoBr },
-              { label: "3 BR", value: fmr.threeBr },
-              { label: "4 BR", value: fmr.fourBr },
-            ].map((row) => {
-              const isThree = row.label === "3 BR";
-              return (
-                <div
-                  key={row.label}
-                  className={`rounded-xl p-3 text-center border ${
-                    isThree
-                      ? "border-gold/50 bg-gold/10"
-                      : "border-white/10 bg-white/5"
-                  }`}
-                >
-                  <p className="text-white/40 text-xs mb-1">{row.label}</p>
-                  <p className={`font-bold text-sm ${isThree ? "text-gold" : "text-white"}`}>
-                    ${(row.value / 1000).toFixed(1)}k
-                  </p>
-                </div>
-              );
-            })}
-          </div>
 
-          <p className="text-white/20 text-xs">
-            HUD Fair Market Rents · {address.city}, {address.state} {address.zipCode}
-          </p>
         </div>
 
         {/* ══════════════════════════════════════════════════════════════
