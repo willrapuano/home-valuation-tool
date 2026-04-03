@@ -184,7 +184,7 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
               disabled={emailLoading || emailSent}
               className="bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-all disabled:opacity-60 flex items-center gap-2"
             >
-              {emailSent ? "✓ Report Sent!" : emailLoading ? "Sending..." : "📧 Email Me This Report"}
+              {emailSent ? "✓ Request Received!" : emailLoading ? "Sending..." : "📧 Get Full Report"}
             </button>
             <button
               onClick={onStartOver}
@@ -194,24 +194,11 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
             </button>
           </div>
 
-          {/* Report URL — shown after email is sent */}
-          {emailSent && reportUrl && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 bg-white/10 rounded-xl px-4 py-3">
-              <span className="text-white/50 text-xs shrink-0">Your report:</span>
-              <a
-                href={reportUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-gold text-xs underline underline-offset-2 truncate max-w-[200px] hover:opacity-80 transition-opacity"
-              >
-                {reportUrl.replace("https://", "")}
-              </a>
-              <button
-                onClick={handleCopyLink}
-                className="shrink-0 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold px-3 py-1 rounded-lg text-xs transition-all"
-              >
-                {linkCopied ? "✓ Copied!" : "📋 Copy Link"}
-              </button>
+          {/* Confirmation message — shown after request submitted */}
+          {emailSent && (
+            <div className="mt-3 bg-gold/10 border border-gold/30 rounded-xl px-4 py-3">
+              <p className="text-gold text-sm font-semibold">✓ Request received!</p>
+              <p className="text-white/60 text-xs mt-1">Candee will be in touch within 24 hours with your complimentary home valuation.</p>
             </div>
           )}
         </div>
