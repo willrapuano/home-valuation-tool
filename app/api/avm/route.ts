@@ -49,17 +49,17 @@ function buildStreetViewUrl(address: string): string {
   return `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_KEY}`;
 }
 
-async function fetchHudAMI(state: string): Promise<number | null> {
-  const HUD_TOKEN = process.env.HUD_API_TOKEN;
-  if (!HUD_TOKEN) return null;
-  const fips = STATE_FMR_FIPS[state?.toUpperCase()] || STATE_FMR_FIPS["VA"];
+async function fetchZipMedianIncome(zip: string): Promise<number | null> {
   try {
-    const res = await fetch(`https://www.huduser.gov/hudapi/public/il/data/${fips}`, {
-      headers: { Authorization: `Bearer ${HUD_TOKEN}` },
-    });
+    const res = await fetch(
+      `https://api.census.gov/data/2022/acs/acs5?get=NAME,B19013_001E&for=zip+code+tabulation+area:${zip}`
+    );
     const data = await res.json();
-    const income = data?.data?.median_income;
-    return income > 0 ? income : null;
+    if (data?.length > 1) {
+      const income = parseInt(data[1][1]);
+      return income > 0 ? income : null;
+    }
+    return null;
   } catch { return null; }
 }
 
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
 
   const fullAddress = passedFullAddress || [address, city, state, zipCode].filter(Boolean).join(", ");
   const streetViewUrl = buildStreetViewUrl(fullAddress);
-  const amiPromise = fetchHudAMI(state || "VA");
+  const amiPromise = fetchZipMedianIncome(zipCode);
   const fmrPromise = fetchHudFMR(zipCode, state || "VA");
 
   try {
