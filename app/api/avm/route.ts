@@ -5,7 +5,34 @@ const VALUATION_API_KEY = "valuation-api-key-2026";
 
 const GOOGLE_MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyC-JJ1EHFKypH-RMQaemYKSp2ZrXoGVcP8";
 
-const NOVA_FMR = { studio: 2050, oneBr: 2080, twoBr: 2370, threeBr: 2960, fourBr: 3540 };
+const NOVA_FMR_DEFAULT = { studio: 2050, oneBr: 2080, twoBr: 2370, threeBr: 2960, fourBr: 3540 };
+
+// State → Fairfax County FIPS (covers most of NoVA)
+const STATE_FMR_FIPS: Record<string, string> = {
+  VA: "5105999999", MD: "5003199999", DC: "1100199999",
+};
+
+async function fetchHudFMR(zip: string, state: string): Promise<typeof NOVA_FMR_DEFAULT> {
+  const HUD_TOKEN = process.env.HUD_API_TOKEN;
+  if (!HUD_TOKEN) return NOVA_FMR_DEFAULT;
+  const fips = STATE_FMR_FIPS[state?.toUpperCase()] || STATE_FMR_FIPS["VA"];
+  try {
+    const res = await fetch(`https://www.huduser.gov/hudapi/public/fmr/data/${fips}`, {
+      headers: { Authorization: `Bearer ${HUD_TOKEN}` },
+    });
+    const data = await res.json();
+    const zipData = data?.data?.basicdata?.find((d: Record<string, unknown>) => d.zip_code === zip)
+      || data?.data?.basicdata?.[0]; // MSA level fallback
+    if (!zipData) return NOVA_FMR_DEFAULT;
+    return {
+      studio: zipData["Efficiency"] || NOVA_FMR_DEFAULT.studio,
+      oneBr: zipData["One-Bedroom"] || NOVA_FMR_DEFAULT.oneBr,
+      twoBr: zipData["Two-Bedroom"] || NOVA_FMR_DEFAULT.twoBr,
+      threeBr: zipData["Three-Bedroom"] || NOVA_FMR_DEFAULT.threeBr,
+      fourBr: zipData["Four-Bedroom"] || NOVA_FMR_DEFAULT.fourBr,
+    };
+  } catch { return NOVA_FMR_DEFAULT; }
+}
 
 const ZIP_ESTIMATES: Record<string, number> = {
   "22101": 1200000,"22102": 950000,"22103": 850000,"22151": 700000,"22152": 680000,
@@ -39,7 +66,7 @@ function zipFallback(zip: string, address: string, areaMedianIncome: number | nu
     estimate: base, low: Math.floor(base * 0.96), high: Math.ceil(base * 1.04),
     confidence: "low", source: "estimate", comps: [],
     streetViewUrl: buildStreetViewUrl(address),
-    fmr: NOVA_FMR,
+    fmr: NOVA_FMR_DEFAULT,
     areaMedianIncome,
     pricePerSqft: null, rentZestimate: null,
     beds: null, baths: null, sqft: null, yearBuilt: null, homeType: null,
@@ -55,6 +82,7 @@ export async function POST(req: NextRequest) {
   const fullAddress = passedFullAddress || [address, city, state, zipCode].filter(Boolean).join(", ");
   const streetViewUrl = buildStreetViewUrl(fullAddress);
   const amiPromise = fetchCensusAMI(zipCode);
+  const fmrPromise = fetchHudFMR(zipCode, state || "VA");
 
   try {
     const streetOnly = (address || "").split(",")[0].trim();
@@ -73,7 +101,7 @@ export async function POST(req: NextRequest) {
       }),
     });
 
-    const areaMedianIncome = await amiPromise;
+    const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
 
     if (!res.ok) {
       console.error("Mac Mini API error:", res.status);
@@ -94,7 +122,7 @@ export async function POST(req: NextRequest) {
       source: "zillow",
       comps: [],
       streetViewUrl,
-      fmr: NOVA_FMR,
+      fmr,
       areaMedianIncome,
       pricePerSqft: data.pricePerSqft || null,
       rentZestimate: data.rentZestimate || null,
