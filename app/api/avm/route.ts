@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
       return zipFallback(zipCode, fullAddress, areaMedianIncome);
     }
 
-    const finalStreetViewUrl = buildStreetViewUrl(fullAddress, data.lat || undefined, data.lng || undefined);
+    const finalStreetViewUrl = data.photoUrl || buildStreetViewUrl(fullAddress, data.lat || undefined, data.lng || undefined);
 
     return NextResponse.json({
       estimate: data.average,
