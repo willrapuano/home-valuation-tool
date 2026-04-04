@@ -45,8 +45,13 @@ const ZIP_ESTIMATES: Record<string, number> = {
   "20165": 540000,"20166": 500000,"20175": 580000,"20176": 560000,"20105": 650000,
 };
 
-function buildStreetViewUrl(address: string): string {
-  return `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_KEY}`;
+function buildStreetViewUrl(address: string, lat?: number, lng?: number): string {
+  const GMAPS = "AIzaSyBIaGiZ7rhO9ByCpbucA0YeLEp-IP7CndU";
+  if (lat && lng) {
+    // Use lat/lng with heading pointing at the property from nearby pano
+    return `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${lat},${lng}&radius=300&fov=90&key=${GMAPS}`;
+  }
+  return `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${encodeURIComponent(address)}&key=${GMAPS}`;
 }
 
 async function fetchZipMedianIncome(zip: string): Promise<number | null> {
@@ -83,7 +88,7 @@ export async function POST(req: NextRequest) {
   if (!zipCode) return zipFallback("22015", address || "", null);
 
   const fullAddress = passedFullAddress || [address, city, state, zipCode].filter(Boolean).join(", ");
-  const streetViewUrl = buildStreetViewUrl(fullAddress);
+  const streetViewUrl = buildStreetViewUrl(fullAddress); // will be overridden with lat/lng if available
   const amiPromise = fetchZipMedianIncome(zipCode);
   const fmrPromise = fetchHudFMR(zipCode, state || "VA");
 
@@ -117,6 +122,8 @@ export async function POST(req: NextRequest) {
       return zipFallback(zipCode, fullAddress, areaMedianIncome);
     }
 
+    const finalStreetViewUrl = buildStreetViewUrl(fullAddress, data.lat || undefined, data.lng || undefined);
+
     return NextResponse.json({
       estimate: data.average,
       low: data.low,
@@ -124,7 +131,7 @@ export async function POST(req: NextRequest) {
       confidence: "high",
       source: "zillow",
       comps: [],
-      streetViewUrl,
+      streetViewUrl: finalStreetViewUrl,
       fmr,
       areaMedianIncome,
       pricePerSqft: data.pricePerSqft || null,
