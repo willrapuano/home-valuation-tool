@@ -12,7 +12,7 @@ interface Props {
 const LOADING_STEPS = [
   { label: "Verifying address...", duration: 800 },
   { label: "Searching MLS records...", duration: 1200 },
-  { label: "Pulling Zillow Zestimate...", duration: 2000 },
+  { label: "Analyzing comparable sales...", duration: 2000 },
   { label: "Analyzing recent sales...", duration: 2000 },
   { label: "Calculating rental potential...", duration: 2000 },
   { label: "Calculating market trends...", duration: 2000 },
