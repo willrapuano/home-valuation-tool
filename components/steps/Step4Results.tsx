@@ -124,6 +124,8 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
             src={streetViewUrl}
             alt={`Street view of ${address.full}`}
             className="w-full h-60 md:h-72 object-cover"
+            referrerPolicy="no-referrer"
+            crossOrigin="anonymous"
             onError={() => setImgError(true)}
           />
         ) : (
@@ -139,11 +141,11 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
         <div className="absolute inset-0 bg-gradient-to-t from-navy via-navy/65 to-transparent" />
 
         {/* Overlaid content */}
-        <div className="absolute bottom-0 left-0 right-0 p-5 md:p-7">
+        <div className="absolute bottom-0 left-0 right-0 p-4 md:p-7">
           <p className="text-white/50 text-xs uppercase tracking-widest mb-1">
             Estimated Market Value
           </p>
-          <p className="text-4xl md:text-5xl font-bold text-gold leading-none mb-2">
+          <p className="text-3xl md:text-5xl font-bold text-gold leading-none mb-2">
             {formatCurrency(valuation.estimate)}
           </p>
           <p className="text-white font-semibold text-base mb-1">
