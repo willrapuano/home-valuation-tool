@@ -92,6 +92,43 @@ appreciation rate, etc.) are **documented assumptions calibrated for Northern
 Virginia**, not universal truths. Re-derive them by regression against closed
 sales before pointing this at another market.
 
+### Providers
+
+`lib/comps/providers/titleflex.ts` implements `CompsProvider` against DataTrace
+TitleFlex. It is **scaffolded, not activated** — it is not wired into `/api/avm`
+yet, because the field mapping is unverified.
+
+**The mapping is provisional.** It was written from TitleFlex's public product
+descriptions, not their API specification. Everything vendor-specific is
+isolated in `FIELD_ALIASES`, and each field lists several candidate names and
+takes the first present, so it may work unmodified — but verify before trusting
+it:
+
+```ts
+const provider = TitleFlexProvider.fromEnv();
+console.log(await provider!.describe(subject));
+// → { recordCount, resolved: { soldPrice: "saleAmount", ... }, unmappedKeys: [...] }
+```
+
+`resolved` shows which alias matched each field (`null` = unmatched, needs
+fixing); `unmappedKeys` shows vendor fields we're ignoring. Correct
+`FIELD_ALIASES` from that output — the tests pin mapping *behaviour*, not field
+names, so they should keep passing.
+
+Once configured, `/api/health` reports TitleFlex reachability and distinguishes
+an auth failure from a wrong endpoint path.
+
+**Two open questions with DataTrace before this goes live:**
+
+1. Which endpoint returns nearby *closed sales* for a radius + date window. If
+   there isn't one, comps must be assembled from a geographic search plus
+   per-property sale history — a different and much chattier shape than what is
+   currently written.
+2. Whether the licence permits displaying this data to anonymous consumers on a
+   public website. Many property-data licences allow internal business use and
+   client deliverables but restrict public redistribution, which is exactly what
+   a lead-magnet tool does.
+
 ### Operational endpoints
 
 - **`GET /api/health`** — returns **503** when the tool cannot produce

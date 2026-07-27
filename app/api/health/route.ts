@@ -103,6 +103,47 @@ async function checkHud(): Promise<Check> {
     : { status: "degraded", critical: false, detail: res.error ?? `HTTP ${res.status}.`, latencyMs: res.ms };
 }
 
+/**
+ * TitleFlex is not yet critical — it is scaffolded but not wired into the
+ * valuation path, since the field mapping is unverified. Flip `critical` to
+ * true once it is the primary comps source.
+ */
+async function checkTitleFlex(): Promise<Check> {
+  const key = process.env.TITLEFLEX_API_KEY;
+  const url = process.env.TITLEFLEX_API_URL;
+  if (!key || !url) {
+    return {
+      status: "not_configured",
+      critical: false,
+      detail: "TITLEFLEX_API_KEY / TITLEFLEX_API_URL unset — comps provider inactive.",
+    };
+  }
+
+  const authHeader = process.env.TITLEFLEX_AUTH_HEADER || "Authorization";
+  const scheme = process.env.TITLEFLEX_AUTH_SCHEME === undefined ? "Bearer" : process.env.TITLEFLEX_AUTH_SCHEME;
+  const res = await probe(`${url.replace(/\/+$/, "")}${process.env.TITLEFLEX_SEARCH_PATH || "/property/sales/search"}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      [authHeader]: scheme ? `${scheme} ${key}` : key,
+    },
+    body: JSON.stringify({ latitude: 38.94, longitude: -77.161, radiusMiles: 1, limit: 1 }),
+  });
+
+  if (res.ok) {
+    return { status: "ok", critical: false, detail: "Reachable and authenticated.", latencyMs: res.ms };
+  }
+  return {
+    status: "degraded",
+    critical: false,
+    detail: res.status === 401 || res.status === 403
+      ? `Authentication rejected (HTTP ${res.status}) — check key, auth header and scheme.`
+      : res.error ?? `HTTP ${res.status} (the search path may be wrong — see TITLEFLEX_SEARCH_PATH).`,
+    latencyMs: res.ms,
+  };
+}
+
 function checkStreetView(): Check {
   return process.env.GOOGLE_MAPS_API_KEY
     ? { status: "ok", critical: false, detail: "Key configured." }
@@ -116,14 +157,16 @@ function checkCrm(): Check {
 }
 
 export async function GET() {
-  const [valuation, census, hud] = await Promise.all([
+  const [valuation, census, hud, titleflex] = await Promise.all([
     checkValuationUpstream(),
     checkCensus(),
     checkHud(),
+    checkTitleFlex(),
   ]);
 
   const checks: Record<string, Check> = {
     valuationUpstream: valuation,
+    titleflex,
     census,
     hud,
     streetView: checkStreetView(),
