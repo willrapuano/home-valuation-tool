@@ -134,15 +134,10 @@ function FullResults({
   );
   const CMA_URL = `mailto:ccurrie@ttrsir.com?subject=${CMA_SUBJECT}&body=${CMA_BODY}`;
 
-  const fmr = valuation.fmr ?? {
-    studio: 2050,
-    oneBr: 2080,
-    twoBr: 2370,
-    threeBr: 2960,
-    fourBr: 3540,
-  };
-
-  const suggestedRent = valuation.rentZestimate ?? fmr.threeBr;
+  // Only ever a real figure: a rent Zestimate for this property, or HUD Fair
+  // Market Rents when a token is configured. The static NoVA table that used
+  // to back-fill this was the same fabrication we removed from the valuation.
+  const suggestedRent = valuation.rentZestimate ?? valuation.fmr?.threeBr ?? null;
   const pricePerSqft = valuation.pricePerSqft ?? null;
 
   return (
@@ -230,6 +225,17 @@ function FullResults({
             </button>
           </div>
 
+          {/* How the number was reached — a stated method reads very
+              differently from an unexplained figure. */}
+          {valuation.compCount ? (
+            <p className="text-white/40 text-xs mt-3">
+              Based on {valuation.compCount} comparable {valuation.compCount === 1 ? "sale" : "sales"}
+              {valuation.compRadiusMiles ? ` within ${valuation.compRadiusMiles} miles` : ""}
+              {valuation.lookbackMonths ? `, closed in the last ${valuation.lookbackMonths} months` : ""}
+              , adjusted to your property.
+            </p>
+          ) : null}
+
           {/* Confirmation message — shown after request submitted */}
           {emailSent && (
             <div className="mt-3 bg-gold/10 border border-gold/30 rounded-xl px-4 py-3">
@@ -255,26 +261,46 @@ function FullResults({
           </p>
         </div>
 
-        {/* Price / SqFt */}
+        {/* Price / SqFt where known, otherwise the county assessment — which
+            is the more interesting number anyway: it's what the property is
+            taxed on, and the gap to market value is the story. */}
         <div className="glass rounded-2xl p-4 border border-white/10 text-center">
-          <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Price / SqFt</p>
           {pricePerSqft ? (
             <>
+              <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Price / SqFt</p>
               <p className="text-white font-bold text-xl">${pricePerSqft.toLocaleString()}</p>
               <p className="text-white/30 text-xs mt-0.5">per sqft</p>
             </>
+          ) : valuation.assessedValue ? (
+            <>
+              <p className="text-white/40 text-xs uppercase tracking-wider mb-1">County Assessment</p>
+              <p className="text-white font-bold text-xl">{formatCurrency(valuation.assessedValue)}</p>
+              <p className="text-white/30 text-xs mt-0.5">
+                {valuation.estimate > valuation.assessedValue ? "+" : ""}
+                {Math.round(((valuation.estimate - valuation.assessedValue) / valuation.assessedValue) * 100)}% vs estimate
+              </p>
+            </>
           ) : (
-            <p className="text-white/40 font-bold text-xl">—</p>
+            <>
+              <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Price / SqFt</p>
+              <p className="text-white/40 font-bold text-xl">—</p>
+            </>
           )}
         </div>
 
         {/* Est. Monthly Rent */}
         <div className="glass rounded-2xl p-4 border border-white/10 text-center">
           <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Est. Monthly Rent</p>
-          <p className="text-white font-bold text-xl">{formatCurrency(suggestedRent)}</p>
-          <p className="text-white/30 text-xs mt-0.5">
-            {valuation.rentZestimate ? "For this property" : "Area 3BR benchmark"}
-          </p>
+          {suggestedRent ? (
+            <>
+              <p className="text-white font-bold text-xl">{formatCurrency(suggestedRent)}</p>
+              <p className="text-white/30 text-xs mt-0.5">
+                {valuation.rentZestimate ? "For this property" : "HUD area benchmark"}
+              </p>
+            </>
+          ) : (
+            <p className="text-white/40 font-bold text-xl">—</p>
+          )}
         </div>
 
         {/* Area Median Income */}
@@ -308,6 +334,9 @@ function FullResults({
           <div className="space-y-0">
             <Row label="Price Range" value={`${formatCurrency(valuation.low)} – ${formatCurrency(valuation.high)}`} />
             <Row label="Confidence Level" value={<ConfidenceBadge confidence={valuation.confidence} />} />
+            {valuation.compCount ? (
+              <Row label="Comparable Sales" value={`${valuation.compCount} used`} />
+            ) : null}
             {valuation.homeType && (
               <Row label="Home Type" value={valuation.homeType.replace(/_/g, " ")} />
             )}
@@ -338,6 +367,15 @@ function FullResults({
             {valuation.yearBuilt && (
               <Row label="Year Built" value={String(valuation.yearBuilt)} />
             )}
+            {valuation.assessedValue && (
+              <Row label="County Assessment" value={formatCurrency(valuation.assessedValue)} />
+            )}
+            {valuation.compRadiusMiles && (
+              <Row label="Search Radius" value={`${valuation.compRadiusMiles} miles`} />
+            )}
+            {valuation.lookbackMonths && (
+              <Row label="Sales Reviewed" value={`Last ${valuation.lookbackMonths} months`} />
+            )}
             <Row label="Location" value={`${address.city}, ${address.state} ${address.zipCode}`} last />
           </div>
         </div>
@@ -346,34 +384,34 @@ function FullResults({
       {/* ══════════════════════════════════════════════════════════════
           4. RENTAL MARKET ANALYSIS
       ══════════════════════════════════════════════════════════════ */}
-      <div className="glass rounded-2xl p-5 md:p-6 border border-white/10">
-        <h3 className="text-gold font-bold text-xs uppercase tracking-wider mb-5 flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-          </svg>
-          Rental Market Analysis
-        </h3>
+      {/* Only rendered when a real rent figure exists — no static back-fill. */}
+      {suggestedRent !== null && (
+        <div className="glass rounded-2xl p-5 md:p-6 border border-white/10">
+          <h3 className="text-gold font-bold text-xs uppercase tracking-wider mb-5 flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+            Rental Market Analysis
+          </h3>
 
-        {/* Suggested Rent hero */}
-        <div className="bg-gold/10 border border-gold/30 rounded-xl p-4 mb-5 flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <p className="text-white/50 text-xs uppercase tracking-wider">Suggested Rent</p>
-            <p className="text-gold font-bold text-3xl mt-1">
-              {formatCurrency(suggestedRent)}
-              <span className="text-gold/50 text-base font-normal">/mo</span>
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-white/40 text-xs">Annual Gross</p>
-            <p className="text-white font-semibold">{formatCurrency(suggestedRent * 12)}</p>
-            <p className="text-white/30 text-xs mt-1">
-              ~{((suggestedRent * 12) / valuation.estimate * 100).toFixed(1)}% gross yield
-            </p>
+          <div className="bg-gold/10 border border-gold/30 rounded-xl p-4 flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <p className="text-white/50 text-xs uppercase tracking-wider">Suggested Rent</p>
+              <p className="text-gold font-bold text-3xl mt-1">
+                {formatCurrency(suggestedRent)}
+                <span className="text-gold/50 text-base font-normal">/mo</span>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-white/40 text-xs">Annual Gross</p>
+              <p className="text-white font-semibold">{formatCurrency(suggestedRent * 12)}</p>
+              <p className="text-white/30 text-xs mt-1">
+                ~{((suggestedRent * 12) / valuation.estimate * 100).toFixed(1)}% gross yield
+              </p>
+            </div>
           </div>
         </div>
-
-
-      </div>
+      )}
 
       {/* ══════════════════════════════════════════════════════════════
           5. CTA SECTION

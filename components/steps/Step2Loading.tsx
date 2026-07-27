@@ -77,6 +77,11 @@ export default function Step2Loading({ address, sqft, onComplete, onAddressRejec
             state: resolvedState,
             zipCode: resolvedZip,
             fullAddress: address.full,
+            // Coordinates from the step 1 autocomplete. Without these the
+            // county comps engine can't run and we fall back to the external
+            // upstream.
+            lat: address.lat,
+            lng: address.lng,
             sqft,
           }),
           signal: AbortSignal.timeout(MAX_DISPLAY_MS + 4000),

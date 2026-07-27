@@ -32,9 +32,10 @@ A multi-step home valuation lead capture tool built for Candee Currie (TTR Sothe
 | Layer | Source | Required key | If missing |
 |---|---|---|---|
 | Address autocomplete | Nominatim (OpenStreetMap) | none | — |
-| Property valuation | `VALUATION_API_URL` upstream | `VALUATION_API_KEY` | No estimate returned; UI routes to a manual CMA |
+| Property valuation (Fairfax) | County records + our comps engine | none | Falls through to the upstream below |
+| Property valuation (elsewhere) | `VALUATION_API_URL` upstream | `VALUATION_API_KEY` | No estimate returned; UI routes to a manual CMA |
 | Median household income | Census ACS 5-year | `CENSUS_API_KEY` | Field hidden |
-| Fair Market Rents | HUD FMR API | `HUD_API_TOKEN` | Static NoVA averages |
+| Fair Market Rents | HUD FMR API | `HUD_API_TOKEN` | Rental section hidden entirely |
 | Property imagery | Google Street View via `/api/streetview` | `GOOGLE_MAPS_API_KEY` | Placeholder tile |
 | Lead capture | GoHighLevel | `GHL_API_KEY` | No-op, flow still completes |
 
@@ -86,8 +87,9 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
-The tool runs without any keys set — with no valuation upstream it routes to the
-prepared-CMA screen, so you can work on the funnel without credentials.
+The tool runs without any keys set. Fairfax County addresses are valued from
+public records with no credentials at all; everything else routes to the
+prepared-CMA screen.
 
 ---
 

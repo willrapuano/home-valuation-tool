@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { TtlCache, addressCacheKey } from "@/lib/cache";
 import { RateLimiter, clientKey } from "@/lib/rate-limit";
+import { valueFromComps } from "@/lib/comps";
+import { FairfaxCountyProvider } from "@/lib/comps/providers/fairfax";
 
 /* ──────────────────────────────────────────────────────────────
    Upstream valuation service.
@@ -60,29 +62,41 @@ const STATE_FMR_FIPS: Record<string, string> = {
   DC: "1100199999",
 };
 
-async function fetchHudFMR(zip: string, state: string): Promise<typeof NOVA_FMR_DEFAULT> {
+type FmrResult = { source: "hud" | "default"; values: typeof NOVA_FMR_DEFAULT };
+
+/**
+ * Rent benchmarks. The `source` matters: without a HUD token this returns
+ * static NoVA averages, and presenting those as this property's rent would be
+ * the same fabrication we removed from the valuation itself. Callers must
+ * only display `values` when `source` is "hud".
+ */
+async function fetchHudFMR(zip: string, state: string): Promise<FmrResult> {
+  const fallback: FmrResult = { source: "default", values: NOVA_FMR_DEFAULT };
   const HUD_TOKEN = process.env.HUD_API_TOKEN;
-  if (!HUD_TOKEN) return NOVA_FMR_DEFAULT;
+  if (!HUD_TOKEN) return fallback;
   const fips = STATE_FMR_FIPS[state?.toUpperCase()] || STATE_FMR_FIPS["VA"];
   try {
     const res = await fetchWithTimeout(`https://www.huduser.gov/hudapi/public/fmr/data/${fips}`, {
       headers: { Authorization: `Bearer ${HUD_TOKEN}` },
     });
-    if (!res.ok) return NOVA_FMR_DEFAULT;
+    if (!res.ok) return fallback;
     const data = await res.json();
     const zipData =
       data?.data?.basicdata?.find((d: Record<string, unknown>) => d.zip_code === zip) ||
       data?.data?.basicdata?.[0]; // MSA level fallback
-    if (!zipData) return NOVA_FMR_DEFAULT;
+    if (!zipData) return fallback;
     return {
-      studio: zipData["Efficiency"] || NOVA_FMR_DEFAULT.studio,
-      oneBr: zipData["One-Bedroom"] || NOVA_FMR_DEFAULT.oneBr,
-      twoBr: zipData["Two-Bedroom"] || NOVA_FMR_DEFAULT.twoBr,
-      threeBr: zipData["Three-Bedroom"] || NOVA_FMR_DEFAULT.threeBr,
-      fourBr: zipData["Four-Bedroom"] || NOVA_FMR_DEFAULT.fourBr,
+      source: "hud",
+      values: {
+        studio: zipData["Efficiency"] || NOVA_FMR_DEFAULT.studio,
+        oneBr: zipData["One-Bedroom"] || NOVA_FMR_DEFAULT.oneBr,
+        twoBr: zipData["Two-Bedroom"] || NOVA_FMR_DEFAULT.twoBr,
+        threeBr: zipData["Three-Bedroom"] || NOVA_FMR_DEFAULT.threeBr,
+        fourBr: zipData["Four-Bedroom"] || NOVA_FMR_DEFAULT.fourBr,
+      },
     };
   } catch {
-    return NOVA_FMR_DEFAULT;
+    return fallback;
   }
 }
 
@@ -127,6 +141,73 @@ function buildStreetViewUrl(address: string, lat?: number, lng?: number): string
   return `/api/streetview?location=${encodeURIComponent(location)}`;
 }
 
+/* ── In-house comps valuation ──────────────────────────────────── */
+
+/**
+ * Rough bounding box for Fairfax County, used only to skip a pointless round
+ * trip for addresses obviously outside it. The provider's spatial query is
+ * authoritative — this is a cheap pre-filter, not a boundary test.
+ */
+const FAIRFAX_BBOX = { minLat: 38.55, maxLat: 39.08, minLng: -77.56, maxLng: -77.0 };
+
+function inFairfax(lat: number, lng: number): boolean {
+  return (
+    lat >= FAIRFAX_BBOX.minLat && lat <= FAIRFAX_BBOX.maxLat &&
+    lng >= FAIRFAX_BBOX.minLng && lng <= FAIRFAX_BBOX.maxLng
+  );
+}
+
+const RADIUS_MILES = 1.5;
+const LOOKBACK_MONTHS = 12;
+
+/**
+ * Value the property from county sales records using our own comps engine.
+ * Returns null when the address is out of area or there aren't enough usable
+ * comparables — the caller then falls through to the next source.
+ */
+async function valueFromCountyRecords(lat: number, lng: number) {
+  if (!inFairfax(lat, lng)) return null;
+
+  const provider = new FairfaxCountyProvider();
+  const location = { lat, lng };
+
+  // Run concurrently: the candidate search only needs the location, not the
+  // subject's own attributes, so there is no reason to wait for one before
+  // starting the other. Sequentially these were stacking into a timeout.
+  const [subjectInfo, candidates] = await Promise.all([
+    provider.lookupSubject(location),
+    provider.fetchCandidates(
+      { location, propertyType: "single_family" },
+      { radiusMiles: RADIUS_MILES, lookbackMonths: LOOKBACK_MONTHS, limit: 200 }
+    ),
+  ]);
+
+  if (!subjectInfo?.assessedValue) return null;
+
+  const subject = {
+    location,
+    propertyType: subjectInfo.propertyType ?? ("single_family" as const),
+    assessedValue: subjectInfo.assessedValue,
+  };
+
+  const result = valueFromComps(subject, candidates);
+  if (result.estimate === null) return null;
+
+  const maxDistance = result.comps.reduce((m, c) => Math.max(m, c.distanceMiles), 0);
+
+  return {
+    estimate: Math.round(result.estimate),
+    low: result.low!,
+    high: result.high!,
+    confidence: result.confidence,
+    confidenceScore: result.confidenceScore,
+    compCount: result.comps.length,
+    compRadiusMiles: Number(maxDistance.toFixed(2)),
+    lookbackMonths: LOOKBACK_MONTHS,
+    assessedValue: subjectInfo.assessedValue,
+  };
+}
+
 /* ── No-valuation fallback ─────────────────────────────────────── */
 
 /**
@@ -145,7 +226,7 @@ function buildStreetViewUrl(address: string, lat?: number, lng?: number): string
 function noValuation(
   address: string,
   areaMedianIncome: number | null,
-  fmr: typeof NOVA_FMR_DEFAULT = NOVA_FMR_DEFAULT
+  fmr?: FmrResult
 ): Record<string, unknown> {
   return {
     estimate: null,
@@ -158,7 +239,7 @@ function noValuation(
       "We couldn't retrieve verified sales data for this property, so no automated estimate was produced.",
     comps: [],
     streetViewUrl: buildStreetViewUrl(address),
-    fmr,
+    fmr: fmr?.source === "hud" ? fmr.values : null,
     areaMedianIncome,
     pricePerSqft: null, rentZestimate: null,
     beds: null, baths: null, sqft: null, yearBuilt: null, homeType: null,
@@ -191,7 +272,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const { address, zipCode, city, state, fullAddress: passedFullAddress } = body;
+  const { address, zipCode, city, state, lat, lng, fullAddress: passedFullAddress } = body;
 
   // Previously this silently fell back to 22015 (Burke, VA) — returning a
   // Northern Virginia number for an address that might be anywhere.
@@ -216,10 +297,50 @@ export async function POST(req: NextRequest) {
   const amiPromise = fetchZipMedianIncome(zipCode);
   const fmrPromise = fetchHudFMR(zipCode, state || "VA");
 
-  // No upstream configured — don't burn a timeout discovering that.
+  // ── 1. Our own comps engine, on county public records ──────────
+  //
+  // Tried first: it needs no credentials, no third party, and produces a
+  // result we can explain comp by comp. Coordinates come from the address
+  // autocomplete in step 1.
+  if (typeof lat === "number" && typeof lng === "number") {
+    try {
+      const valued = await valueFromCountyRecords(lat, lng);
+      if (valued) {
+        const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
+        console.info(
+          `[avm] valued from ${valued.compCount} county comps ` +
+            `(confidence ${valued.confidence})`
+        );
+        return respond(cacheKey, {
+          estimate: valued.estimate,
+          low: valued.low,
+          high: valued.high,
+          confidence: valued.confidence,
+          confidenceScore: valued.confidenceScore,
+          source: "county-comps",
+          degraded: false,
+          comps: [],
+          compCount: valued.compCount,
+          compRadiusMiles: valued.compRadiusMiles,
+          lookbackMonths: valued.lookbackMonths,
+          assessedValue: valued.assessedValue,
+          streetViewUrl: buildStreetViewUrl(fullAddress, lat, lng),
+          fmr: fmr.source === "hud" ? fmr.values : null,
+          areaMedianIncome,
+          pricePerSqft: null, rentZestimate: null,
+          beds: null, baths: null, sqft: null, yearBuilt: null, homeType: null,
+        });
+      }
+    } catch (err) {
+      // Never let a county-data problem take down the request; fall through.
+      console.error(`[avm] county comps failed: ${(err as Error)?.message ?? err}`);
+    }
+  }
+
+  // ── 2. External valuation upstream, if one is configured ───────
   if (!VALUATION_API_URL) {
     const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
-    console.warn("[avm] VALUATION_API_URL not configured — no valuation available");
+    console.warn("[avm] no county comps and VALUATION_API_URL not configured");
     return respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
   }
 
@@ -267,7 +388,7 @@ export async function POST(req: NextRequest) {
       degraded: false,
       comps: [],
       streetViewUrl: data.photoUrl || buildStreetViewUrl(fullAddress, data.lat, data.lng),
-      fmr,
+      fmr: fmr.source === "hud" ? fmr.values : null,
       areaMedianIncome,
       pricePerSqft: data.pricePerSqft || null,
       rentZestimate: data.rentZestimate || null,

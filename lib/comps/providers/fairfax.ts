@@ -25,7 +25,9 @@ const BASE = "https://www.fairfaxcounty.gov/mercator/rest/services/GIS";
 const SALES_LAYER = `${BASE}/ParcelPlusSales/MapServer/0/query`;
 const ASSESSED_LAYER = `${BASE}/ParcelPlusAssessedValues/MapServer/0/query`;
 
-const TIMEOUT_MS = 15_000;
+// Kept well under the API route's own budget: the county service is
+// occasionally slow, and a long hang here burns the whole request.
+const TIMEOUT_MS = 7_000;
 /** The service caps a single response at 2000 features. */
 const MAX_RECORDS = 2000;
 
@@ -264,35 +266,45 @@ export class FairfaxCountyProvider implements CompsProvider {
     pins: string[]
   ): Promise<Map<string, { luc?: string; assessed?: number }>> {
     const byPin = new Map<string, { luc?: string; assessed?: number }>();
-    const CHUNK = 100;
 
-    for (let i = 0; i < pins.length; i += CHUNK) {
-      const chunk = pins.slice(i, i + CHUNK);
-      // PINs contain spaces, so they must be quoted literals.
-      const where = `PIN IN (${chunk.map(p => `'${p.replace(/'/g, "''")}'`).join(",")})`;
+    // Chunks run concurrently. Sequentially, a dense area with several hundred
+    // sales needed enough round trips to blow the request budget entirely.
+    //
+    // Kept small: the server evaluates a `PIN IN (...)` clause slowly, and a
+    // single 179-value clause timed out at 7s. Several small clauses in
+    // parallel are far quicker than one large one.
+    const CHUNK = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < pins.length; i += CHUNK) chunks.push(pins.slice(i, i + CHUNK));
 
-      // Don't swallow this. A silent failure here leaves every parcel in the
-      // chunk without a land use code, which the engine then rejects as an
-      // incomparable property type — losing most of the comp pool while
-      // looking like a legitimate filtering decision.
-      const features = await esriQuery(ASSESSED_LAYER, {
-        where,
-        outFields: "PIN,LUC,APRTOT",
-        returnGeometry: "false",
-        resultRecordCount: String(MAX_RECORDS),
-      }).catch(err => {
-        console.warn(`[fairfax] assessed-value lookup failed for ${chunk.length} parcels: ${err.message}`);
-        return [] as EsriFeature[];
-      });
+    const results = await Promise.all(
+      chunks.map(chunk => {
+        // PINs contain spaces, so they must be quoted literals.
+        const where = `PIN IN (${chunk.map(p => `'${p.replace(/'/g, "''")}'`).join(",")})`;
 
-      for (const f of features) {
-        const pin = String(f.attributes.PIN ?? "").trim();
-        if (!pin) continue;
-        byPin.set(pin, {
-          luc: f.attributes.LUC ? String(f.attributes.LUC).trim() : undefined,
-          assessed: typeof f.attributes.APRTOT === "number" ? f.attributes.APRTOT : undefined,
+        // Don't swallow this silently. A failure here leaves every parcel in
+        // the chunk without a land use code, which the engine then rejects as
+        // an incomparable property type — losing most of the comp pool while
+        // looking like a legitimate filtering decision.
+        return esriQuery(ASSESSED_LAYER, {
+          where,
+          outFields: "PIN,LUC,APRTOT",
+          returnGeometry: "false",
+          resultRecordCount: String(MAX_RECORDS),
+        }).catch(err => {
+          console.warn(`[fairfax] assessed-value lookup failed for ${chunk.length} parcels: ${err.message}`);
+          return [] as EsriFeature[];
         });
-      }
+      })
+    );
+
+    for (const f of results.flat()) {
+      const pin = String(f.attributes.PIN ?? "").trim();
+      if (!pin) continue;
+      byPin.set(pin, {
+        luc: f.attributes.LUC ? String(f.attributes.LUC).trim() : undefined,
+        assessed: typeof f.attributes.APRTOT === "number" ? f.attributes.APRTOT : undefined,
+      });
     }
 
     return byPin;

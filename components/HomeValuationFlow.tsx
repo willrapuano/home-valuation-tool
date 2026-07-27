@@ -35,6 +35,13 @@ export type ValuationData = {
   /** True when no property-level valuation is available. */
   degraded?: boolean;
   degradedReason?: string;
+  /** 0–1 score behind the confidence bucket. */
+  confidenceScore?: number;
+  /** How the estimate was reached — used to describe the method to the user. */
+  compCount?: number;
+  compRadiusMiles?: number;
+  lookbackMonths?: number;
+  assessedValue?: number;
   comps: {
     address: string;
     soldPrice: number;
@@ -45,13 +52,14 @@ export type ValuationData = {
     pricePerSqft?: number;
   }[];
   streetViewUrl?: string;
+  /** Present only when real HUD data was retrieved; null otherwise. */
   fmr?: {
     studio: number;
     oneBr: number;
     twoBr: number;
     threeBr: number;
     fourBr: number;
-  };
+  } | null;
   areaMedianIncome?: number | null;
   pricePerSqft?: number | null;
   rentZestimate?: number | null;
