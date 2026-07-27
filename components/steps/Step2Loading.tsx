@@ -7,29 +7,38 @@ interface Props {
   address: AddressData;
   sqft?: number;
   onComplete: (data: ValuationData) => void;
+  onAddressRejected: (message: string) => void;
 }
 
+/**
+ * Labels shown while the lookup runs. These describe what the tool actually
+ * does — it does not search MLS or BrightMLS records.
+ */
 const LOADING_STEPS = [
-  { label: "Verifying address...", duration: 800 },
-  { label: "Searching MLS records...", duration: 1200 },
-  { label: "Analyzing comparable sales...", duration: 2000 },
-  { label: "Analyzing recent sales...", duration: 2000 },
-  { label: "Calculating rental potential...", duration: 2000 },
-  { label: "Calculating market trends...", duration: 2000 },
-  { label: "Fetching census data...", duration: 2000 },
-  { label: "Preparing your estimate...", duration: 2000 },
+  "Verifying address...",
+  "Looking up property records...",
+  "Checking recent area sales...",
+  "Estimating rental potential...",
+  "Preparing your estimate...",
 ];
 
-export default function Step2Loading({ address, sqft, onComplete }: Props) {
+/**
+ * The progress screen used to run on a fixed 14s timeline regardless of how
+ * fast the data came back. Now it races the real request: we hold for a short
+ * floor so the transition doesn't feel jarring, then move on as soon as the
+ * data lands, and give up at the cap.
+ */
+const MIN_DISPLAY_MS = 2500;
+const MAX_DISPLAY_MS = 8000;
+const STEP_INTERVAL_MS = 900;
+
+export default function Step2Loading({ address, sqft, onComplete, onAddressRejected }: Props) {
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    let stepIndex = 0;
-    const totalDuration = LOADING_STEPS.reduce((s, step) => s + step.duration, 0);
-    let elapsed = 0;
+    const startedAt = Date.now();
 
     // Parse city/state/zip from full address if not set
     const parts = address.full.split(",").map(s => s.trim());
@@ -39,63 +48,64 @@ export default function Step2Loading({ address, sqft, onComplete }: Props) {
     const resolvedZip = address.zipCode || stateParts[1] || "";
     const resolvedStreet = (`${address.streetNumber} ${address.streetName}`.trim()) || parts[0] || address.full;
 
-    // Fetch valuation data in parallel
-    const fetchData = fetch("/api/avm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        address: resolvedStreet,
-        city: resolvedCity,
-        state: resolvedState,
-        zipCode: resolvedZip,
-        fullAddress: address.full,
-        sqft,
-      }),
-    }).then(r => r.json());
+    // Advance the step label and creep the bar forward on a timer. The bar is
+    // capped below 95% so completion always lines up with real data arriving.
+    const stepTimer = setInterval(() => {
+      if (cancelled) return;
+      const elapsed = Date.now() - startedAt;
+      setCurrentStep(Math.min(Math.floor(elapsed / STEP_INTERVAL_MS), LOADING_STEPS.length - 1));
+      setProgress(Math.min(Math.round((elapsed / MAX_DISPLAY_MS) * 90), 90));
+    }, 100);
 
-    // Progress animation
-    const animateSteps = async () => {
-      for (const step of LOADING_STEPS) {
-        if (cancelled) break;
-        setCurrentStep(stepIndex);
-        await sleep(step.duration);
-        elapsed += step.duration;
-        setProgress(Math.round((elapsed / totalDuration) * 95));
-        stepIndex++;
-      }
+    const finish = async (data: ValuationData) => {
+      const remaining = MIN_DISPLAY_MS - (Date.now() - startedAt);
+      if (remaining > 0) await sleep(remaining);
+      if (cancelled) return;
+      setProgress(100);
+      await sleep(300);
+      if (!cancelled) onComplete(data);
     };
 
     const run = async () => {
-      await animateSteps();
-
-      if (cancelled) return;
-
       try {
-        const data = await fetchData;
+        const res = await fetch("/api/avm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            address: resolvedStreet,
+            city: resolvedCity,
+            state: resolvedState,
+            zipCode: resolvedZip,
+            fullAddress: address.full,
+            sqft,
+          }),
+          signal: AbortSignal.timeout(MAX_DISPLAY_MS + 4000),
+        });
 
-        if (!cancelled) {
-          setProgress(100);
-          await sleep(400);
-          if (!cancelled) {
-            onComplete(data as ValuationData);
-          }
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+
+        // Address wasn't specific enough — bounce back to step 1 rather than
+        // inventing a number for a ZIP we don't have.
+        if (res.status === 422 || data?.error === "address_incomplete") {
+          onAddressRejected(
+            data?.message ??
+              "We couldn't determine a ZIP code for that address. Please re-enter it including city, state and ZIP."
+          );
+          return;
         }
+
+        if (!res.ok) throw new Error(`AVM responded ${res.status}`);
+
+        await finish(data as ValuationData);
       } catch (err) {
-        if (!cancelled) {
-          console.error("AVM fetch error:", err);
-          // Provide fallback
-          const fallback: ValuationData = {
-            estimate: 500000,
-            low: 460000,
-            high: 540000,
-            confidence: "low",
-            source: "estimate",
-            comps: [],
-          };
-          setProgress(100);
-          await sleep(400);
-          if (!cancelled) onComplete(fallback);
-        }
+        if (cancelled) return;
+        console.error("AVM fetch error:", err);
+        // Never fabricate a value here. Send them back with an honest message
+        // instead of showing a made-up $500k estimate as if it were real.
+        onAddressRejected(
+          "We couldn't reach our valuation service just now. Please try again in a moment."
+        );
       }
     };
 
@@ -103,8 +113,9 @@ export default function Step2Loading({ address, sqft, onComplete }: Props) {
 
     return () => {
       cancelled = true;
+      clearInterval(stepTimer);
     };
-  }, [address, sqft, onComplete]);
+  }, [address, sqft, onComplete, onAddressRejected]);
 
   return (
     <div className="animate-fade-in text-center">
@@ -145,32 +156,18 @@ export default function Step2Loading({ address, sqft, onComplete }: Props) {
         {/* Loading step text */}
         <div className="h-6 mb-6">
           <p className="text-gold/80 text-sm font-medium transition-all duration-300 animate-pulse">
-            {LOADING_STEPS[currentStep]?.label || "Finalizing..."}
+            {LOADING_STEPS[currentStep] ?? "Finalizing..."}
           </p>
         </div>
 
         {/* Progress bar */}
         <div className="w-full max-w-xs mx-auto bg-white/10 rounded-full h-2 overflow-hidden mb-4">
           <div
-            className="h-full gold-gradient rounded-full transition-all duration-500 ease-out"
+            className="h-full gold-gradient rounded-full transition-all duration-300 ease-out"
             style={{ width: `${progress}%` }}
           />
         </div>
         <p className="text-white/30 text-xs">{progress}% complete</p>
-
-        {/* Mini stats animating */}
-        <div className="grid grid-cols-3 gap-3 mt-8">
-          {[
-            { label: "MLS Records", value: "BrightMLS" },
-            { label: "Sales Radius", value: "1 mile" },
-            { label: "Lookback", value: "6 months" },
-          ].map((item) => (
-            <div key={item.label} className="bg-white/5 rounded-xl p-3">
-              <p className="text-gold text-xs font-semibold">{item.value}</p>
-              <p className="text-white/30 text-xs mt-0.5">{item.label}</p>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );

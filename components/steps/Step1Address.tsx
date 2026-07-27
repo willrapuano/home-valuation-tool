@@ -6,13 +6,17 @@ export type AddressData = {
   full: string; streetNumber: string; streetName: string;
   city: string; state: string; zipCode: string; lat?: number; lng?: number;
 };
-interface Props { onSubmit: (data: AddressData, sqft?: number) => void; }
+interface Props {
+  onSubmit: (data: AddressData, sqft?: number) => void;
+  /** Message carried back from a failed lookup, e.g. an incomplete address. */
+  initialError?: string | null;
+}
 interface Suggestion { place_id: string; display_name: string; address: Record<string, string>; lat: string; lon: string; }
 
-export default function Step1Address({ onSubmit }: Props) {
+export default function Step1Address({ onSubmit, initialError }: Props) {
   const [value, setValue] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError ?? "");
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedRef = useRef<AddressData | null>(null);
@@ -75,7 +79,7 @@ export default function Step1Address({ onSubmit }: Props) {
         <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">
           What&apos;s Your Home<br /><span className="text-gold">Worth Today?</span>
         </h1>
-        <p className="text-white/60 text-lg max-w-md mx-auto">Get an instant estimate powered by real MLS data. No obligation. Takes 30 seconds.</p>
+        <p className="text-white/60 text-lg max-w-md mx-auto">Get an instant estimate from public property data. No obligation. Takes 30 seconds.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="glass rounded-2xl p-6 md:p-8 gold-border">
@@ -129,7 +133,7 @@ export default function Step1Address({ onSubmit }: Props) {
           </button>
         </div>
         <div className="flex items-center justify-center gap-6 mt-6 pt-5 border-t border-white/10">
-          <div className="flex items-center gap-1.5 text-white/40 text-xs"><span>🏠</span><span>Real MLS Data</span></div>
+          <div className="flex items-center gap-1.5 text-white/40 text-xs"><span>🏠</span><span>Public Property Data</span></div>
           <div className="flex items-center gap-1.5 text-white/40 text-xs"><span>🔒</span><span>100% Private</span></div>
           <div className="flex items-center gap-1.5 text-white/40 text-xs"><span>⚡</span><span>30-Second Results</span></div>
         </div>

@@ -11,8 +11,6 @@ interface Props {
   onStartOver: () => void;
 }
 
-const GMAPS_KEY = "AIzaSyBIaGiZ7rhO9ByCpbucA0YeLEp-IP7CndU";
-
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -36,7 +34,7 @@ function ConfidenceBadge({ confidence }: { confidence: string }) {
           isHigh ? "bg-green-400" : "bg-yellow-400"
         }`}
       />
-      {isHigh ? "High Confidence" : "Estimated"}
+      {isHigh ? "High Confidence" : "Area Estimate Only"}
     </span>
   );
 }
@@ -70,6 +68,9 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
           homeType: valuation.homeType,
           fmr: valuation.fmr,
           areaMedianIncome: valuation.areaMedianIncome,
+          source: valuation.source,
+          degraded: valuation.degraded,
+          degradedReason: valuation.degradedReason,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -88,10 +89,12 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
     } catch { /* ignore */ }
   };
 
-  const svLocation = (valuation as {lat?: number; lng?: number}).lat && (valuation as {lat?: number; lng?: number}).lng
-    ? `${(valuation as {lat?: number}).lat},${(valuation as {lng?: number}).lng}`
-    : encodeURIComponent(address.full);
-  const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${encodeURIComponent(address.full)}&source=outdoor&key=${GMAPS_KEY}`;
+  // Use the URL the server resolved — it may be an actual listing photo, or a
+  // Street View shot located by lat/lng rather than by address text.
+  const streetViewUrl =
+    valuation.streetViewUrl ?? `/api/streetview?location=${encodeURIComponent(address.full)}`;
+
+  const isDegraded = valuation.degraded === true;
 
   const CMA_SUBJECT = encodeURIComponent(`Free CMA Request — ${address.full}`);
   const CMA_BODY = encodeURIComponent(
@@ -124,8 +127,6 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
             src={streetViewUrl}
             alt={`Street view of ${address.full}`}
             className="w-full h-60 md:h-72 object-cover"
-            referrerPolicy="no-referrer"
-            crossOrigin="anonymous"
             onError={() => setImgError(true)}
           />
         ) : (
@@ -143,11 +144,19 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
         {/* Overlaid content */}
         <div className="absolute bottom-0 left-0 right-0 p-4 md:p-7">
           <p className="text-white/50 text-xs uppercase tracking-widest mb-1">
-            Estimated Market Value
+            {isDegraded ? "Neighborhood Price Range" : "Estimated Market Value"}
           </p>
-          <p className="text-3xl md:text-5xl font-bold text-gold leading-none mb-2">
-            {formatCurrency(valuation.estimate)}
-          </p>
+          {/* When we only have a ZIP average, showing a single precise figure
+              implies a property-level valuation we did not perform. */}
+          {isDegraded ? (
+            <p className="text-2xl md:text-4xl font-bold text-gold leading-none mb-2">
+              {formatCurrency(valuation.low)} – {formatCurrency(valuation.high)}
+            </p>
+          ) : (
+            <p className="text-3xl md:text-5xl font-bold text-gold leading-none mb-2">
+              {formatCurrency(valuation.estimate)}
+            </p>
+          )}
           <p className="text-white font-semibold text-base mb-1">
             {address.streetNumber} {address.streetName}
             <span className="text-white/40 font-normal text-sm ml-2">
@@ -208,12 +217,39 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
       </div>
 
       {/* ══════════════════════════════════════════════════════════════
+          1b. DEGRADED NOTICE — shown when we have no property-level data
+      ══════════════════════════════════════════════════════════════ */}
+      {isDegraded && (
+        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-400/10 p-4 md:p-5">
+          <div className="flex gap-3">
+            <svg className="w-5 h-5 shrink-0 text-yellow-400 mt-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" /><path d="M12 8v5M12 16h.01" />
+            </svg>
+            <div>
+              <p className="text-yellow-400 font-semibold text-sm">
+                This is a preliminary area estimate — not a valuation of your home
+              </p>
+              <p className="text-white/60 text-xs mt-1 leading-relaxed">
+                {valuation.degradedReason ??
+                  "Property-level data was unavailable for this address."}{" "}
+                It doesn&apos;t account for your home&apos;s size, condition, upgrades, or lot.
+                For an accurate figure, request a free CMA below — Candee prepares it by hand
+                from current market activity.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════
           2. STAT ROW — 4 cards
       ══════════════════════════════════════════════════════════════ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {/* Property Value */}
         <div className="glass rounded-2xl p-4 gold-border text-center">
-          <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Property Value</p>
+          <p className="text-white/40 text-xs uppercase tracking-wider mb-1">
+            {isDegraded ? "Area Midpoint" : "Property Value"}
+          </p>
           <p className="text-gold font-bold text-xl">{formatCurrency(valuation.estimate)}</p>
           <p className="text-white/30 text-xs mt-0.5">
             ± {formatCurrency(Math.round((valuation.high - valuation.low) / 2))}
@@ -238,7 +274,7 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
           <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Est. Monthly Rent</p>
           <p className="text-white font-bold text-xl">{formatCurrency(suggestedRent)}</p>
           <p className="text-white/30 text-xs mt-0.5">
-            {valuation.rentZestimate ? "Rent Zestimate" : "HUD FMR 3BR"}
+            {valuation.rentZestimate ? "For this property" : "Area 3BR benchmark"}
           </p>
         </div>
 
@@ -331,9 +367,12 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
           <div className="text-right">
             <p className="text-white/40 text-xs">Annual Gross</p>
             <p className="text-white font-semibold">{formatCurrency(suggestedRent * 12)}</p>
-            <p className="text-white/30 text-xs mt-1">
-              ~{((suggestedRent * 12) / valuation.estimate * 100).toFixed(1)}% gross yield
-            </p>
+            {/* Yield against a ZIP average isn't a yield for this property. */}
+            {!isDegraded && (
+              <p className="text-white/30 text-xs mt-1">
+                ~{((suggestedRent * 12) / valuation.estimate * 100).toFixed(1)}% gross yield
+              </p>
+            )}
           </div>
         </div>
 

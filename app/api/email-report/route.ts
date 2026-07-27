@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BASE_URL = "https://home-valuation-tool.vercel.app";
+const BASE_URL =
+  process.env.NEXT_PUBLIC_BASE_URL ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://home-valuation-tool.vercel.app");
 
 function buildReportUrl(body: {
   address: { full: string; streetNumber: string; streetName: string; city: string; state: string; zipCode: string };
@@ -17,6 +19,9 @@ function buildReportUrl(body: {
   homeType?: string | null;
   fmr?: { studio: number; oneBr: number; twoBr: number; threeBr: number; fourBr: number };
   areaMedianIncome?: number | null;
+  source?: string;
+  degraded?: boolean;
+  degradedReason?: string;
 }): string {
   const reportData = {
     address: body.address,
@@ -25,7 +30,11 @@ function buildReportUrl(body: {
       low: body.low,
       high: body.high,
       confidence: body.confidence ?? "medium",
-      source: "Zillow AVM",
+      // Carry the real provenance through — this used to be hardcoded, so a
+      // ZIP-average fallback was labelled as a property-level AVM in the report.
+      source: body.source ?? "estimate",
+      degraded: body.degraded ?? false,
+      degradedReason: body.degradedReason,
       beds: body.beds,
       baths: body.baths,
       sqft: body.sqft,
@@ -59,6 +68,9 @@ export async function POST(req: NextRequest) {
     homeType,
     fmr,
     areaMedianIncome,
+    source,
+    degraded,
+    degradedReason,
   } = body;
 
   if (!email) return NextResponse.json({ error: "Email required" }, { status: 400 });
@@ -88,6 +100,9 @@ export async function POST(req: NextRequest) {
     homeType,
     fmr,
     areaMedianIncome,
+    source,
+    degraded,
+    degradedReason,
   });
 
   const apiKey = process.env.GHL_API_KEY;
@@ -117,6 +132,9 @@ export async function POST(req: NextRequest) {
       ``,
       `Property: ${addressFull}`,
       `Estimated Value: ${valueSummary}`,
+      degraded
+        ? `⚠️ AREA ESTIMATE ONLY — no property-level data was available, so the figure above is a ZIP-code average. Treat as a lead signal, not a valuation.`
+        : null,
       beds ? `Beds: ${beds}` : null,
       baths ? `Baths: ${baths}` : null,
       sqft ? `Sqft: ${Number(sqft).toLocaleString()}` : null,

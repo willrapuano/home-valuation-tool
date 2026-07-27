@@ -4,8 +4,6 @@ import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 
-const GMAPS_KEY = "AIzaSyC-JJ1EHFKypH-RMQaemYKSp2ZrXoGVcP8";
-
 type AddressData = {
   full: string;
   streetNumber: string;
@@ -154,9 +152,8 @@ function ReportContent() {
 
   const { address, valuation } = data;
 
-  const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${encodeURIComponent(
-    address.full
-  )}&key=${GMAPS_KEY}`;
+  // Proxied so the Maps key stays server-side.
+  const streetViewUrl = `/api/streetview?location=${encodeURIComponent(address.full)}`;
 
   const fmr = valuation.fmr ?? {
     studio: 2050,

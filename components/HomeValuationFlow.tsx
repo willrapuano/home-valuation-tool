@@ -27,6 +27,9 @@ export type ValuationData = {
   high: number;
   confidence: string;
   source: string;
+  /** True when we could not get property-level data and fell back to a ZIP average. */
+  degraded?: boolean;
+  degradedReason?: string;
   comps: {
     address: string;
     soldPrice: number;
@@ -62,16 +65,25 @@ export default function HomeValuationFlow() {
   const [lead, setLead] = useState<LeadData | null>(null);
   const [valuation, setValuation] = useState<ValuationData | null>(null);
   const [sqft, setSqft] = useState<number | undefined>(undefined);
+  const [addressError, setAddressError] = useState<string | null>(null);
 
   const handleAddressSubmit = useCallback((data: AddressData, estimatedSqft?: number) => {
     setAddress(data);
     setSqft(estimatedSqft);
+    setAddressError(null);
     setStep(2);
   }, []);
 
   const handleLoadingComplete = useCallback((data: ValuationData) => {
     setValuation(data);
     setStep(3);
+  }, []);
+
+  /** Address wasn't specific enough to look up — send them back to fix it. */
+  const handleAddressRejected = useCallback((message: string) => {
+    setAddressError(message);
+    setAddress(null);
+    setStep(1);
   }, []);
 
   const handleLeadSubmit = useCallback((data: LeadData) => {
@@ -85,6 +97,7 @@ export default function HomeValuationFlow() {
     setLead(null);
     setValuation(null);
     setSqft(undefined);
+    setAddressError(null);
   }, []);
 
   return (
@@ -109,13 +122,14 @@ export default function HomeValuationFlow() {
       <main className="flex-1 flex items-center justify-center px-4 py-8">
         <div className="w-full max-w-2xl">
           {step === 1 && (
-            <Step1Address onSubmit={handleAddressSubmit} />
+            <Step1Address onSubmit={handleAddressSubmit} initialError={addressError} />
           )}
           {step === 2 && address && (
             <Step2Loading
               address={address}
               sqft={sqft}
               onComplete={handleLoadingComplete}
+              onAddressRejected={handleAddressRejected}
             />
           )}
           {step === 3 && address && valuation && (
@@ -146,7 +160,7 @@ export default function HomeValuationFlow() {
           </a>
         </p>
         <p className="text-white/20 text-xs mt-1">
-          Estimates are based on available MLS data and are not a formal appraisal.
+          Estimates are generated from publicly available data and are not a formal appraisal.
           All data is deemed reliable but not guaranteed.
         </p>
       </footer>
