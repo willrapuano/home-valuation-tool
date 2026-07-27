@@ -68,6 +68,36 @@ interface EsriFeature {
 }
 
 /**
+ * Raised when a layer responds successfully but without the fields we depend
+ * on — i.e. the county changed the schema under us.
+ *
+ * This must be distinguishable from "no results". Without it, a renamed
+ * column produces records that `mapRecord` silently drops, and zero comps
+ * looks exactly like no sales nearby: the tool degrades, returns HTTP 200,
+ * and nobody learns anything.
+ */
+export class FairfaxSchemaError extends Error {
+  constructor(readonly layer: string, readonly missing: string[], readonly present: string[]) {
+    super(
+      `Fairfax ${layer} response is missing expected field(s): ${missing.join(", ")}. ` +
+        `Fields present: ${present.join(", ")}`
+    );
+    this.name = "FairfaxSchemaError";
+  }
+}
+
+/** Field presence check. Uses `in` rather than truthiness — null is a legal value. */
+function assertFields(features: EsriFeature[], required: string[], layer: string): void {
+  if (!features.length) return; // legitimately empty is not a schema problem
+  const sample = features[0].attributes ?? {};
+  const missing = required.filter(f => !(f in sample));
+  if (missing.length) throw new FairfaxSchemaError(layer, missing, Object.keys(sample));
+}
+
+const SALES_FIELDS = ["PIN", "SALEDT", "PRICE", "SALEVAL_DESC"];
+const ASSESSED_FIELDS = ["PIN", "LUC", "APRTOT"];
+
+/**
  * Query an ArcGIS layer.
  *
  * POSTs rather than GETs: a `PIN IN (...)` clause covering a few hundred
@@ -199,6 +229,8 @@ export class FairfaxCountyProvider implements CompsProvider {
       returnGeometry: "true",
     });
 
+    assertFields(sales, SALES_FIELDS, "ParcelPlusSales");
+
     if (!sales.length) return [];
 
     // Assessed values come from a second layer, joined on PIN.
@@ -264,8 +296,8 @@ export class FairfaxCountyProvider implements CompsProvider {
    */
   private async fetchAssessed(
     pins: string[]
-  ): Promise<Map<string, { luc?: string; assessed?: number }>> {
-    const byPin = new Map<string, { luc?: string; assessed?: number }>();
+  ): Promise<Map<string, { luc?: string; assessed?: number; taxYear?: number }>> {
+    const byPin = new Map<string, { luc?: string; assessed?: number; taxYear?: number }>();
 
     // Chunks run concurrently. Sequentially, a dense area with several hundred
     // sales needed enough round trips to blow the request budget entirely.
@@ -288,22 +320,28 @@ export class FairfaxCountyProvider implements CompsProvider {
         // looking like a legitimate filtering decision.
         return esriQuery(ASSESSED_LAYER, {
           where,
-          outFields: "PIN,LUC,APRTOT",
+          outFields: "PIN,LUC,APRTOT,TAXYR",
           returnGeometry: "false",
           resultRecordCount: String(MAX_RECORDS),
         }).catch(err => {
+          // A schema break must not be swallowed as a transient failure.
+          if (err instanceof FairfaxSchemaError) throw err;
           console.warn(`[fairfax] assessed-value lookup failed for ${chunk.length} parcels: ${err.message}`);
           return [] as EsriFeature[];
         });
       })
     );
 
-    for (const f of results.flat()) {
+    const flat = results.flat();
+    assertFields(flat, ASSESSED_FIELDS, "ParcelPlusAssessedValues");
+
+    for (const f of flat) {
       const pin = String(f.attributes.PIN ?? "").trim();
       if (!pin) continue;
       byPin.set(pin, {
         luc: f.attributes.LUC ? String(f.attributes.LUC).trim() : undefined,
         assessed: typeof f.attributes.APRTOT === "number" ? f.attributes.APRTOT : undefined,
+        taxYear: typeof f.attributes.TAXYR === "number" ? f.attributes.TAXYR : undefined,
       });
     }
 
@@ -317,7 +355,9 @@ export class FairfaxCountyProvider implements CompsProvider {
    * the parcel polygon, so an exact point intersect misses. Widen the search
    * until a parcel is found instead of reporting the property as unknown.
    */
-  async lookupSubject(location: LatLng): Promise<Partial<SubjectProperty> | null> {
+  async lookupSubject(
+    location: LatLng
+  ): Promise<(Partial<SubjectProperty> & { taxYear?: number }) | null> {
     const geometry = JSON.stringify({
       x: location.lng,
       y: location.lat,
@@ -343,7 +383,7 @@ export class FairfaxCountyProvider implements CompsProvider {
         inSR: "4326",
         outSR: "4326",
         where: `LUC IN (${residentialCodes})`,
-        outFields: "PIN,LUC,APRTOT",
+        outFields: "PIN,LUC,APRTOT,TAXYR",
         returnGeometry: "false",
         resultRecordCount: "1",
       });
@@ -352,12 +392,158 @@ export class FairfaxCountyProvider implements CompsProvider {
     return null;
   }
 
-  private toSubject(a: Record<string, unknown>, location: LatLng): Partial<SubjectProperty> {
+  private toSubject(
+    a: Record<string, unknown>,
+    location: LatLng
+  ): Partial<SubjectProperty> & { taxYear?: number } {
 
     return {
       location,
       propertyType: LAND_USE[String(a.LUC ?? "").trim()] ?? "other",
       assessedValue: typeof a.APRTOT === "number" ? a.APRTOT : undefined,
+      taxYear: typeof a.TAXYR === "number" ? a.TAXYR : undefined,
     };
   }
+}
+
+/* ── Health canary ─────────────────────────────────────────────── */
+
+export interface FairfaxHealth {
+  ok: boolean;
+  /** Problems that mean the source is broken now. */
+  failures: string[];
+  /** Things that still work but have moved — worth a look, not an alert. */
+  warnings: string[];
+  compCount: number;
+  /** Most recent sale in the response; a stalled feed shows up here. */
+  newestSaleDate: string | null;
+  daysSinceNewestSale: number | null;
+  /** Share of sold parcels whose land use code we recognise. */
+  landUseCoverage: number;
+  /** Median sale ÷ assessment locally. Steps when the county reassesses. */
+  medianSaleToAssessedRatio: number | null;
+  /** Assessment year in the response. Increments each January. */
+  taxYear: number | null;
+  latencyMs: number;
+}
+
+/**
+ * A known-good parcel in McLean that has consistently had comps nearby. If
+ * this returns nothing, the problem is ours or the county's — not the market.
+ */
+export const CANARY_LOCATION: LatLng = { lat: 38.94, lng: -77.161 };
+
+/** Below this, the feed has probably stopped updating rather than the market stopping. */
+const STALE_SALE_DAYS = 60;
+/** Below this share of recognised land use codes, the code list has probably changed. */
+const MIN_LAND_USE_COVERAGE = 0.5;
+/** Expected sale-to-assessment ratio band for Fairfax; outside it, something shifted. */
+const EXPECTED_RATIO = { min: 0.9, max: 1.4 };
+
+/**
+ * Exercise the whole path and report what's wrong specifically.
+ *
+ * Every failure mode below currently produces the same observable output — a
+ * degraded valuation and an HTTP 200 — which is also what a legitimately
+ * out-of-area address produces. The point of this is to tell them apart.
+ */
+export async function checkFairfaxHealth(
+  location: LatLng = CANARY_LOCATION
+): Promise<FairfaxHealth> {
+  const started = Date.now();
+  const failures: string[] = [];
+  const warnings: string[] = [];
+
+  const empty = (): FairfaxHealth => ({
+    ok: false, failures, warnings, compCount: 0,
+    newestSaleDate: null, daysSinceNewestSale: null,
+    landUseCoverage: 0, medianSaleToAssessedRatio: null, taxYear: null,
+    latencyMs: Date.now() - started,
+  });
+
+  const provider = new FairfaxCountyProvider();
+
+  let comps: ComparableSale[];
+  try {
+    comps = await provider.fetchCandidates(
+      { location, propertyType: "single_family" },
+      { radiusMiles: 1.5, lookbackMonths: 12, limit: 200 }
+    );
+  } catch (err) {
+    failures.push(
+      err instanceof FairfaxSchemaError
+        ? `Schema changed: ${err.message}`
+        : `Unreachable: ${(err as Error)?.message ?? String(err)}`
+    );
+    return empty();
+  }
+
+  if (!comps.length) {
+    failures.push("No sales returned for the canary location, which should always have some.");
+    return empty();
+  }
+
+  // Stale feed: the market doesn't stop, the pipeline does.
+  const newestSaleDate = comps.reduce<string | null>(
+    (n, c) => (!n || c.soldDate > n ? c.soldDate : n),
+    null
+  );
+  const daysSinceNewestSale = newestSaleDate
+    ? Math.floor((Date.now() - Date.parse(newestSaleDate)) / 86_400_000)
+    : null;
+  if (daysSinceNewestSale !== null && daysSinceNewestSale > STALE_SALE_DAYS) {
+    failures.push(
+      `Newest sale is ${daysSinceNewestSale} days old (limit ${STALE_SALE_DAYS}) — the feed has likely stopped updating.`
+    );
+  }
+
+  // Land use codes: if these change, everything becomes "other" and the
+  // engine rejects it as incomparable, which reads as "no comps nearby".
+  const recognised = comps.filter(c => c.propertyType !== "other").length;
+  const landUseCoverage = recognised / comps.length;
+  if (landUseCoverage < MIN_LAND_USE_COVERAGE) {
+    failures.push(
+      `Only ${(landUseCoverage * 100).toFixed(0)}% of sold parcels have a recognised land use code ` +
+        `(expected >${MIN_LAND_USE_COVERAGE * 100}%) — the county's code list has probably changed.`
+    );
+  }
+
+  // Reassessment drift: no error, but every estimate moves with it.
+  const ratios = comps
+    .filter(c => c.assessedValue && c.assessedValue > 0)
+    .map(c => c.soldPrice / c.assessedValue!)
+    .sort((a, b) => a - b);
+  const medianSaleToAssessedRatio = ratios.length
+    ? ratios[Math.floor(ratios.length / 2)]
+    : null;
+  if (
+    medianSaleToAssessedRatio !== null &&
+    (medianSaleToAssessedRatio < EXPECTED_RATIO.min || medianSaleToAssessedRatio > EXPECTED_RATIO.max)
+  ) {
+    warnings.push(
+      `Median sale-to-assessment ratio is ${medianSaleToAssessedRatio.toFixed(3)}, outside the ` +
+        `expected ${EXPECTED_RATIO.min}–${EXPECTED_RATIO.max}. Estimates ride on this ratio, so a ` +
+        `shift moves every valuation without producing an error.`
+    );
+  }
+
+  const taxYear = await provider
+    .lookupSubject(location)
+    .then(s => s?.taxYear ?? null)
+    .catch(() => null);
+
+  return {
+    ok: failures.length === 0,
+    failures,
+    warnings,
+    compCount: comps.length,
+    newestSaleDate,
+    daysSinceNewestSale,
+    landUseCoverage: Number(landUseCoverage.toFixed(3)),
+    medianSaleToAssessedRatio: medianSaleToAssessedRatio
+      ? Number(medianSaleToAssessedRatio.toFixed(3))
+      : null,
+    taxYear,
+    latencyMs: Date.now() - started,
+  };
 }

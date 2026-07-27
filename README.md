@@ -57,6 +57,48 @@ promised.
 subject property has no business on the screen, and the funnel converts on the
 CMA offer rather than on the estimate.
 
+### Detecting when the county source breaks
+
+The Fairfax endpoints are undocumented public GIS services — no versioning, no
+deprecation policy, no SLA. They can change without notice, and every way they
+can break produces the *same* output as a legitimately out-of-area address:
+a degraded valuation and an HTTP 200. That is the real risk, and it is the
+failure that already cost this project months once.
+
+Three layers make it loud instead of silent:
+
+**Schema assertion.** `FairfaxSchemaError` is thrown when a layer responds
+successfully but without `PIN`/`SALEDT`/`PRICE`/`LUC`/`APRTOT`. Without it, a
+renamed column produces records that get silently dropped, and zero comps looks
+identical to no sales nearby.
+
+**Health canary.** `/api/health` values a known McLean parcel and reports the
+specific cause when it can't:
+
+```
+countyComps  ok  142 sales, newest 10d old, 78% land use mapped,
+                 median ratio 1.045, assessment year 2026
+```
+
+It also catches the two failures that produce *no error at all*:
+
+- **Stalled feed** — sales still return, they're just all old. Fails when the
+  newest sale in a 1.5-mile radius is over 60 days old.
+- **Ratio drift** — Fairfax reassesses every January. Estimates ride on the
+  sale-to-assessment ratio, so a reassessment moves every valuation while the
+  tool keeps reporting high confidence. Warns when the median leaves 0.9–1.4,
+  and `taxYear` makes the step visible.
+
+**Scheduled CI** (`.github/workflows/data-source-canary.yml`) runs the canary
+daily so a break surfaces there rather than in a homeowner's browser.
+
+```bash
+npx tsx scripts/fairfax-canary.ts   # exits non-zero when the source is broken
+```
+
+`/api/health` returns 200 when *any* valuation route works and 503 when none
+do — county comps cover Fairfax, the external upstream covers everywhere else.
+
 ### Known limitation: the upstream is the weak link
 
 `VALUATION_API_URL` must point at a **stable hostname**. It was previously hardcoded to

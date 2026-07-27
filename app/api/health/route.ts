@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { checkFairfaxHealth } from "@/lib/comps/providers/fairfax";
 
 /**
  * Health check for uptime monitoring.
@@ -48,8 +49,9 @@ async function checkValuationUpstream(): Promise<Check> {
   if (!url) {
     return {
       status: "not_configured",
-      critical: true,
-      detail: "VALUATION_API_URL is unset — no valuations can be produced.",
+      // Not critical on its own: county comps cover Fairfax without it.
+      critical: false,
+      detail: "VALUATION_API_URL is unset — addresses outside Fairfax County cannot be valued.",
     };
   }
 
@@ -65,14 +67,12 @@ async function checkValuationUpstream(): Promise<Check> {
   });
 
   if (res.ok) {
-    return { status: "ok", critical: true, detail: `Reachable (HTTP ${res.status}).`, latencyMs: res.ms };
+    return { status: "ok", critical: false, detail: `Reachable (HTTP ${res.status}).`, latencyMs: res.ms };
   }
   return {
     status: "degraded",
-    critical: true,
-    detail: res.error
-      ? `Unreachable: ${res.error}.`
-      : `Returned HTTP ${res.status}.`,
+    critical: false,
+    detail: res.error ? `Unreachable: ${res.error}.` : `Returned HTTP ${res.status}.`,
     latencyMs: res.ms,
   };
 }
@@ -93,7 +93,7 @@ async function checkCensus(): Promise<Check> {
 async function checkHud(): Promise<Check> {
   const token = process.env.HUD_API_TOKEN;
   if (!token) {
-    return { status: "not_configured", critical: false, detail: "HUD_API_TOKEN unset — using static NoVA rent averages." };
+    return { status: "not_configured", critical: false, detail: "HUD_API_TOKEN unset — rental section hidden." };
   }
   const res = await probe("https://www.huduser.gov/hudapi/public/fmr/data/5105999999", {
     headers: { Authorization: `Bearer ${token}` },
@@ -144,6 +144,41 @@ async function checkTitleFlex(): Promise<Check> {
   };
 }
 
+/**
+ * Our own comps engine on Fairfax County records — the primary valuation
+ * source. Every way this can break currently produces the same output as a
+ * legitimately out-of-area address, so the canary reports the specific cause.
+ */
+async function checkCountyComps(): Promise<Check> {
+  try {
+    const h = await checkFairfaxHealth();
+    const detail = [
+      `${h.compCount} sales`,
+      h.newestSaleDate ? `newest ${h.daysSinceNewestSale}d old` : null,
+      `${(h.landUseCoverage * 100).toFixed(0)}% land use mapped`,
+      h.medianSaleToAssessedRatio ? `median ratio ${h.medianSaleToAssessedRatio}` : null,
+      h.taxYear ? `assessment year ${h.taxYear}` : null,
+    ].filter(Boolean).join(", ");
+
+    if (!h.ok) {
+      return { status: "degraded", critical: true, detail: h.failures.join(" "), latencyMs: h.latencyMs };
+    }
+    // Warnings don't break the source, but they change the numbers it produces.
+    return {
+      status: "ok",
+      critical: true,
+      detail: h.warnings.length ? `${detail}. WARNING: ${h.warnings.join(" ")}` : detail,
+      latencyMs: h.latencyMs,
+    };
+  } catch (err) {
+    return {
+      status: "degraded",
+      critical: true,
+      detail: `Canary failed: ${(err as Error)?.message ?? String(err)}`,
+    };
+  }
+}
+
 function checkStreetView(): Check {
   return process.env.GOOGLE_MAPS_API_KEY
     ? { status: "ok", critical: false, detail: "Key configured." }
@@ -157,7 +192,8 @@ function checkCrm(): Check {
 }
 
 export async function GET() {
-  const [valuation, census, hud, titleflex] = await Promise.all([
+  const [countyComps, valuation, census, hud, titleflex] = await Promise.all([
+    checkCountyComps(),
     checkValuationUpstream(),
     checkCensus(),
     checkHud(),
@@ -165,6 +201,7 @@ export async function GET() {
   ]);
 
   const checks: Record<string, Check> = {
+    countyComps,
     valuationUpstream: valuation,
     titleflex,
     census,
@@ -173,19 +210,27 @@ export async function GET() {
     crm: checkCrm(),
   };
 
+  // The tool is healthy when SOME route to a valuation works — not when every
+  // one does. County comps cover Fairfax; the upstream covers everywhere else.
+  const valuationSources = { countyComps, externalUpstream: valuation };
+  const workingSources = Object.entries(valuationSources)
+    .filter(([, c]) => c.status === "ok")
+    .map(([name]) => name);
+
   const criticalFailures = Object.entries(checks)
     .filter(([, c]) => c.critical && c.status !== "ok")
     .map(([name]) => name);
 
-  const healthy = criticalFailures.length === 0;
+  const healthy = workingSources.length > 0;
 
   return NextResponse.json(
     {
       status: healthy ? "ok" : "degraded",
       // Stated plainly so whoever reads the alert knows what users are seeing.
       summary: healthy
-        ? "Property-level valuations are working."
+        ? `Valuations working via: ${workingSources.join(", ")}.`
         : "No valuations are being produced — every visitor is being routed to a manual CMA.",
+      workingSources,
       failing: criticalFailures,
       checks,
       timestamp: new Date().toISOString(),

@@ -1,0 +1,40 @@
+name: Data source canary
+
+# The Fairfax County endpoints are undocumented public GIS services with no
+# versioning, deprecation policy or SLA. They can change without notice, and
+# every way they can break produces the same output as a legitimately
+# out-of-area address: a degraded valuation and an HTTP 200.
+#
+# This runs the canary on a schedule so a break surfaces here rather than in a
+# homeowner's browser.
+
+on:
+  schedule:
+    # 13:00 UTC daily — morning in Northern Virginia.
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - "lib/comps/**"
+      - ".github/workflows/data-source-canary.yml"
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Unit tests first: if the detection layer itself is broken, a green
+      # canary would mean nothing.
+      - name: Test the engine and detection layer
+        run: npm test
+
+      - name: Query the live Fairfax data source
+        run: npx tsx scripts/fairfax-canary.ts
