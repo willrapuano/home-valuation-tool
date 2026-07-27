@@ -73,6 +73,10 @@ export function scoreDimensions(input: DimensionInput): Record<string, number | 
       subject.condition && comp.condition
         ? clamp01(1 - Math.abs(subject.condition - comp.condition) / 4)
         : null,
+    // Two homes assessed similarly are usually similar in size, quality and
+    // condition together — the single most useful dimension when building
+    // characteristics aren't published.
+    assessedValue: ratioSimilarity(subject.assessedValue, comp.assessedValue, 0.35),
   };
 }
 

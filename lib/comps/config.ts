@@ -23,6 +23,12 @@ export interface MarketConfig {
   perConditionPoint: number;
   /** Annualised market appreciation, used to time-adjust older sales. */
   annualAppreciation: number;
+  /**
+   * Typical sale price divided by assessed value in this jurisdiction.
+   * Virginia requires assessment at 100% of fair market value, so ~1.0 for
+   * Fairfax. Somewhere assessing at a fraction of market, raise accordingly.
+   */
+  saleToAssessedRatio: number;
 }
 
 export const NOVA_MARKET: MarketConfig = {
@@ -33,6 +39,7 @@ export const NOVA_MARKET: MarketConfig = {
   perYearOfAge: 900,
   perConditionPoint: 25000,
   annualAppreciation: 0.04,
+  saleToAssessedRatio: 1.0,
 };
 
 /** Weight of each similarity dimension. Normalised at use, so relative size is what matters. */
@@ -46,6 +53,7 @@ export interface ScoringWeights {
   subdivision: number;
   schoolZone: number;
   condition: number;
+  assessedValue: number;
 }
 
 export const DEFAULT_WEIGHTS: ScoringWeights = {
@@ -55,7 +63,10 @@ export const DEFAULT_WEIGHTS: ScoringWeights = {
   distance: 2.0,
   subdivision: 2.0,
   schoolZone: 1.25,
-  // Size is the strongest physical driver.
+  // Size is the strongest physical driver. Where assessments are available
+  // they carry slightly more, since one number captures size, quality,
+  // condition and lot together.
+  assessedValue: 1.9,
   sqft: 1.75,
   recency: 1.5,
   vintage: 0.75,
@@ -76,6 +87,18 @@ export interface EngineOptions {
   maxSqftRatio: number;
   /** Hard filter: reject comps needing more than this in gross adjustments. */
   maxGrossAdjustmentRatio: number;
+  /**
+   * Hard filter, only applied when assessed values are available: reject
+   * comps whose sale-to-assessment ratio deviates from the local median by
+   * more than this fraction.
+   *
+   * A house selling far above its assessment usually changed materially
+   * between the two — a teardown, a gut renovation, an assemblage — and a
+   * house selling far below is usually a distressed or non-arm's-length
+   * transfer. Neither is evidence of what a typical home is worth. This is
+   * the assessment-ratio study technique used in mass appraisal.
+   */
+  maxAssessmentRatioDeviation: number;
   /** Number of comps to reconcile from. */
   targetCompCount: number;
   /** Below this many usable comps, refuse to produce an estimate. */
@@ -94,6 +117,7 @@ export const DEFAULT_OPTIONS: EngineOptions = {
   // Appraisal practice treats comps needing very large adjustments as weak
   // evidence — past a point you are valuing a different house.
   maxGrossAdjustmentRatio: 0.35,
+  maxAssessmentRatioDeviation: 0.25,
   targetCompCount: 6,
   minCompCount: 3,
 };

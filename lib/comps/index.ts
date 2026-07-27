@@ -41,7 +41,24 @@ export function valueFromComps(
   const rejected: { comp: ComparableSale; reason: string }[] = [];
   const scored: ScoredComp[] = [];
 
+  // Needs the whole candidate set, so it can't live in the per-comp knockout.
+  const ratioBand = assessmentRatioBand(candidates, opts);
+
   for (const comp of candidates) {
+    if (ratioBand && comp.assessedValue) {
+      const ratio = comp.soldPrice / comp.assessedValue;
+      if (ratio < ratioBand.min || ratio > ratioBand.max) {
+        rejected.push({
+          comp,
+          reason:
+            `sold at ${ratio.toFixed(2)}× assessed value, outside the local ` +
+            `${ratioBand.min.toFixed(2)}–${ratioBand.max.toFixed(2)}× band ` +
+            `(likely a teardown, renovation or non-market transfer)`,
+        });
+        continue;
+      }
+    }
+
     const reason = knockout(subject, comp, asOf, opts);
     if (reason) {
       rejected.push({ comp, reason });
@@ -90,6 +107,32 @@ export function valueFromComps(
   }
 
   return { ...result, comps: selected, rejected };
+}
+
+/**
+ * Acceptable band of sale-to-assessment ratios, centred on the local median.
+ *
+ * Returns null unless there are enough assessed comps to establish a median
+ * worth trusting — with a handful of sales the "outliers" are just the sample.
+ */
+export function assessmentRatioBand(
+  candidates: ComparableSale[],
+  opts: Pick<EngineOptions, "maxAssessmentRatioDeviation">
+): { median: number; min: number; max: number } | null {
+  const ratios = candidates
+    .filter(c => c.assessedValue && c.assessedValue > 0 && c.soldPrice > 0)
+    .map(c => c.soldPrice / c.assessedValue!)
+    .sort((a, b) => a - b);
+
+  if (ratios.length < 8) return null;
+
+  const mid = Math.floor(ratios.length / 2);
+  const median =
+    ratios.length % 2 === 0 ? (ratios[mid - 1] + ratios[mid]) / 2 : ratios[mid];
+  if (!Number.isFinite(median) || median <= 0) return null;
+
+  const dev = opts.maxAssessmentRatioDeviation;
+  return { median, min: median * (1 - dev), max: median * (1 + dev) };
 }
 
 /** Hard filters. Returns a reason string when the candidate is unusable. */

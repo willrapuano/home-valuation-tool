@@ -31,6 +31,17 @@ export interface SubjectProperty {
   subdivision?: string;
   schoolZone?: string;
   zipCode?: string;
+  /**
+   * Total assessed value from the taxing authority.
+   *
+   * Valuable where building characteristics aren't published: an assessment
+   * already encodes size, quality, condition and lot in one number, produced
+   * by someone who inspects the property. In jurisdictions that assess at
+   * full market value (Virginia requires 100% of fair market value), the
+   * difference between two assessments approximates the difference in market
+   * value, which makes it a better adjustment basis than square footage.
+   */
+  assessedValue?: number;
 }
 
 /** A closed sale that might serve as a comparable. */

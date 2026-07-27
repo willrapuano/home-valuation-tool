@@ -34,24 +34,36 @@ export function adjustComp(
     adjustments.time = comp.soldPrice * factor;
   }
 
-  if (subject.sqft && comp.sqft) {
-    adjustments.gla = (subject.sqft - comp.sqft) * market.pricePerSqft;
-  }
-  if (subject.lotSqft && comp.lotSqft) {
-    adjustments.lot = (subject.lotSqft - comp.lotSqft) * market.pricePerLotSqft;
-  }
-  if (subject.baths && comp.baths) {
-    adjustments.baths = (subject.baths - comp.baths) * market.bathValue;
-  }
-  if (subject.beds && comp.beds) {
-    adjustments.beds = (subject.beds - comp.beds) * market.bedValue;
-  }
-  if (subject.yearBuilt && comp.yearBuilt) {
-    // Newer subject than comp => positive adjustment.
-    adjustments.age = (subject.yearBuilt - comp.yearBuilt) * market.perYearOfAge;
-  }
-  if (subject.condition && comp.condition) {
-    adjustments.condition = (subject.condition - comp.condition) * market.perConditionPoint;
+  // An assessment already prices size, quality, condition and lot together,
+  // so when one is available for both properties it REPLACES the physical
+  // grid rather than adding to it. Applying both would double-count the same
+  // differences — a bigger house would be adjusted for its extra square
+  // footage once via GLA and again via the higher assessment it produces.
+  const useAssessment = Boolean(subject.assessedValue && comp.assessedValue);
+
+  if (useAssessment) {
+    adjustments.assessed =
+      (subject.assessedValue! - comp.assessedValue!) * market.saleToAssessedRatio;
+  } else {
+    if (subject.sqft && comp.sqft) {
+      adjustments.gla = (subject.sqft - comp.sqft) * market.pricePerSqft;
+    }
+    if (subject.lotSqft && comp.lotSqft) {
+      adjustments.lot = (subject.lotSqft - comp.lotSqft) * market.pricePerLotSqft;
+    }
+    if (subject.baths && comp.baths) {
+      adjustments.baths = (subject.baths - comp.baths) * market.bathValue;
+    }
+    if (subject.beds && comp.beds) {
+      adjustments.beds = (subject.beds - comp.beds) * market.bedValue;
+    }
+    if (subject.yearBuilt && comp.yearBuilt) {
+      // Newer subject than comp => positive adjustment.
+      adjustments.age = (subject.yearBuilt - comp.yearBuilt) * market.perYearOfAge;
+    }
+    if (subject.condition && comp.condition) {
+      adjustments.condition = (subject.condition - comp.condition) * market.perConditionPoint;
+    }
   }
 
   const values = Object.values(adjustments);
