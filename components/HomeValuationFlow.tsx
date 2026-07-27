@@ -22,12 +22,17 @@ export type LeadData = {
 };
 
 export type ValuationData = {
-  estimate: number;
-  low: number;
-  high: number;
+  /**
+   * Null when no property-level valuation could be produced. In that case the
+   * results screen shows the "valuation being prepared" state — we never
+   * substitute an area average for a number about this specific home.
+   */
+  estimate: number | null;
+  low: number | null;
+  high: number | null;
   confidence: string;
   source: string;
-  /** True when we could not get property-level data and fell back to a ZIP average. */
+  /** True when no property-level valuation is available. */
   degraded?: boolean;
   degradedReason?: string;
   comps: {

@@ -38,139 +38,23 @@ A multi-step home valuation lead capture tool built for Candee Currie (TTR Sothe
 | Property imagery | Google Street View via `/api/streetview` | `GOOGLE_MAPS_API_KEY` | Placeholder tile |
 | Lead capture | GoHighLevel | `GHL_API_KEY` | No-op, flow still completes |
 
-### Degraded mode
+### When no valuation is available
 
-When property-level data is unavailable, `/api/avm` returns `degraded: true` with a
-`degradedReason`. The UI must — and does — say so plainly: it shows a price *range*
-rather than a single figure, labels it "Neighborhood Price Range", and displays a
-notice explaining that the number is a ZIP-code average, not a valuation of that home.
-The GHL note is flagged too, so the agent knows before calling the lead.
+`/api/avm` returns `degraded: true` with **`estimate`, `low` and `high` all null**
+when it cannot value the specific property. It does not substitute an area
+average — an earlier version returned a ZIP-code figure here, which meant every
+home in 22101 came back at $1,200,000 whether it was a mansion or a teardown.
 
-**Do not remove that treatment.** Presenting a ZIP average as a property valuation
-is a misrepresentation, and the tool carries a licensed agent's name.
+The UI switches to a "valuation being prepared" screen (`PreparingValuation.tsx`)
+that shows no number at all and commits to an agent-prepared CMA within 24 hours.
+The lead gate adapts too, so it never promises a figure the next screen can't
+deliver. The lead is still captured and pushed to the CRM, tagged
+`HVT Manual CMA Required`, with a note telling the agent what the homeowner was
+promised.
 
-## Comparables engine (`lib/comps`)
-
-A self-contained comps ranking and reconciliation engine. It is decoupled from
-any data source — it consumes candidate sales from a `CompsProvider` and knows
-nothing about where they came from, so a licensed MLS feed, county assessor
-records, or test fixtures all plug into the same logic.
-
-```ts
-import { valueFromComps, valueWithProvider } from "@/lib/comps";
-
-const result = valueFromComps(subject, candidateSales);
-// → { estimate, low, high, confidence, confidenceScore, comps, rejected, notes }
-```
-
-**How it works**
-
-1. **Knockout filters** — distance, sale recency, property-type substitutability,
-   GLA ratio band, and a cap on total adjustment size. Rejections are returned
-   with a human-readable reason rather than silently dropped.
-2. **Similarity scoring** — each comp is scored per dimension (distance, recency,
-   GLA, lot, vintage, rooms, subdivision, school zone, condition), then combined
-   using configurable weights. Dimensions with no data return `null` and are
-   dropped from the average rather than scored zero, so a missing lot size does
-   not make a comp look bad.
-3. **Adjustment grid** — appraisal-style dollar adjustments toward the subject,
-   including the market-time adjustment that is most often skipped and most
-   often material. Gross and net adjustment ratios are tracked separately.
-4. **Reconciliation** — a similarity-weighted mean, with the range derived from
-   how much the comps actually *disagree* rather than a fixed percentage.
-   Tightly clustered comps earn a narrow band; scattered ones produce a wide
-   one, which is the correct answer rather than a presentation failure.
-
-**Confidence** blends comp count, mean similarity, price dispersion, and mean
-adjustment size — and then lets disagreement *veto* the result. Comps that are
-physically near-identical but sold at wildly different prices score high on
-similarity yet tell you nothing, so agreement caps the final number rather than
-merely contributing to it.
-
-Market constants in `lib/comps/config.ts` (price per sqft, bath value,
-appreciation rate, etc.) are **documented assumptions calibrated for Northern
-Virginia**, not universal truths. Re-derive them by regression against closed
-sales before pointing this at another market.
-
-### Providers
-
-`lib/comps/providers/titleflex.ts` implements `CompsProvider` against DataTrace
-TitleFlex. It is **scaffolded, not activated** — it is not wired into `/api/avm`
-yet, because the field mapping is unverified.
-
-**The mapping is provisional.** It was written from TitleFlex's public product
-descriptions, not their API specification. Everything vendor-specific is
-isolated in `FIELD_ALIASES`, and each field lists several candidate names and
-takes the first present, so it may work unmodified — but verify before trusting
-it:
-
-```ts
-const provider = TitleFlexProvider.fromEnv();
-console.log(await provider!.describe(subject));
-// → { recordCount, resolved: { soldPrice: "saleAmount", ... }, unmappedKeys: [...] }
-```
-
-`resolved` shows which alias matched each field (`null` = unmatched, needs
-fixing); `unmappedKeys` shows vendor fields we're ignoring. Correct
-`FIELD_ALIASES` from that output — the tests pin mapping *behaviour*, not field
-names, so they should keep passing.
-
-Once configured, `/api/health` reports TitleFlex reachability and distinguishes
-an auth failure from a wrong endpoint path.
-
-#### Discovering the integration details
-
-You don't need vendor documentation to configure this. With a live key:
-
-```bash
-TITLEFLEX_API_URL=https://... TITLEFLEX_API_KEY=... npm run probe:titleflex
-```
-
-The probe tries the plausible combinations of auth shape, endpoint path and HTTP
-method, reports which one the API accepts, then reconciles the field mapping
-against the real response — printing the exact env vars to set and which fields
-resolved. The API key is never printed. `--save` writes the raw response to a
-gitignored file.
-
-Questions the probe *can't* answer — licensing, resale scope, rate limits,
-pricing — are written up ready to send in
-[`docs/titleflex-questions.md`](docs/titleflex-questions.md).
-
-**Two open questions with DataTrace before this goes live:**
-
-1. Which endpoint returns nearby *closed sales* for a radius + date window. If
-   there isn't one, comps must be assembled from a geographic search plus
-   per-property sale history — a different and much chattier shape than what is
-   currently written.
-2. Whether the licence permits displaying this data to anonymous consumers on a
-   public website. Many property-data licences allow internal business use and
-   client deliverables but restrict public redistribution, which is exactly what
-   a lead-magnet tool does.
-
-### Operational endpoints
-
-- **`GET /api/health`** — returns **503** when the tool cannot produce
-  property-level valuations, and 200 when it can. Point an uptime monitor at it
-  and alert on non-200. This exists because the original failure was invisible:
-  the upstream vanished and the tool kept returning HTTP 200 with ZIP averages
-  for months. A monitor on the homepage would have stayed green throughout.
-- **`/api/avm`** is cached (1h for real results, 60s for degraded so recovery is
-  picked up quickly) and rate limited (10 burst, ~1 per 6s sustained).
-
-Both the cache and the limiter are **per-instance in-process memory**. On Vercel
-each lambda keeps its own copy, so treat them as a speed bump, not a quota
-system. For an authoritative shared limit, back them with Vercel KV or Upstash —
-the interfaces in `lib/cache.ts` and `lib/rate-limit.ts` are small enough to swap.
-
-## Tests
-
-```bash
-npm test
-```
-
-Vitest, covering the comps engine (geo, scoring, adjustments, knockouts,
-ranking, reconciliation, confidence) and the cache/rate-limit infrastructure.
-The UI and API routes are not yet covered.
+**Do not reintroduce a placeholder number here.** A figure that isn't about the
+subject property has no business on the screen, and the funnel converts on the
+CMA offer rather than on the estimate.
 
 ### Known limitation: the upstream is the weak link
 

@@ -8,8 +8,8 @@ import { RateLimiter, clientKey } from "@/lib/rate-limit";
    NOTE: this is currently the weak link in the whole tool. It must
    point at a STABLE hostname. A `*.trycloudflare.com` Quick Tunnel
    gets a fresh random URL on every restart, so when the tunnel drops
-   the tool silently degrades to the ZIP table below and nobody finds
-   out. Use a named Cloudflare tunnel or a hosted API.
+   the tool stops producing valuations entirely and nobody finds out.
+   Use a named Cloudflare tunnel or a hosted API, and watch /api/health.
 ────────────────────────────────────────────────────────────────── */
 const VALUATION_API_URL = process.env.VALUATION_API_URL || "";
 const VALUATION_API_KEY = process.env.VALUATION_API_KEY || "";
@@ -127,47 +127,35 @@ function buildStreetViewUrl(address: string, lat?: number, lng?: number): string
   return `/api/streetview?location=${encodeURIComponent(location)}`;
 }
 
-/* ── ZIP fallback ──────────────────────────────────────────────── */
-
-const ZIP_ESTIMATES: Record<string, number> = {
-  "22101": 1200000,"22102": 950000,"22103": 850000,"22151": 700000,"22152": 680000,
-  "22153": 660000,"22201": 850000,"22202": 780000,"22203": 820000,"22204": 720000,
-  "22205": 790000,"22206": 750000,"22207": 950000,"22209": 1100000,"22015": 620000,
-  "22031": 750000,"22032": 680000,"22033": 700000,"22041": 650000,"22042": 620000,
-  "22043": 750000,"22044": 620000,"22046": 900000,"22060": 680000,"20120": 580000,
-  "20121": 560000,"20151": 600000,"20170": 750000,"20171": 720000,"20190": 680000,
-  "20191": 650000,"20194": 700000,"20147": 580000,"20148": 560000,"20164": 520000,
-  "20165": 540000,"20166": 500000,"20175": 580000,"20176": 560000,"20105": 650000,
-};
+/* ── No-valuation fallback ─────────────────────────────────────── */
 
 /**
- * Neighbourhood-level guess used when the property-level AVM is unavailable.
- * This is NOT a valuation of the subject property — it is a ZIP-code average
- * with no knowledge of size, condition, or lot. Everything it returns is
- * marked `degraded` so the UI can say so plainly instead of implying the
- * number was derived from the address.
+ * Returned when we cannot value the specific property.
+ *
+ * Deliberately carries NO estimate. A previous version substituted a
+ * ZIP-code average here, which meant every home in 22101 came back at
+ * $1,200,000 whether it was a mansion or a teardown. Labelling that as an
+ * area average did not rescue it — a number that isn't about the subject
+ * property has no business on the screen, and the funnel converts on the
+ * CMA offer rather than on the estimate.
+ *
+ * The UI switches to a "valuation being prepared" state on `degraded`, so
+ * the lead is still captured and routed to the agent.
  */
-function zipFallback(
-  zip: string,
+function noValuation(
   address: string,
   areaMedianIncome: number | null,
   fmr: typeof NOVA_FMR_DEFAULT = NOVA_FMR_DEFAULT
 ): Record<string, unknown> {
-  const known = Object.prototype.hasOwnProperty.call(ZIP_ESTIMATES, zip);
-  const base = ZIP_ESTIMATES[zip] || 650000;
-  // Widen the band when we don't even have the ZIP — a ±4% range implies a
-  // precision this method does not have.
-  const spread = known ? 0.12 : 0.25;
   return {
-    estimate: base,
-    low: Math.floor(base * (1 - spread)),
-    high: Math.ceil(base * (1 + spread)),
-    confidence: "low",
-    source: "zip-average",
+    estimate: null,
+    low: null,
+    high: null,
+    confidence: "none",
+    source: "unavailable",
     degraded: true,
-    degradedReason: known
-      ? "Property-level data was unavailable, so this is a ZIP-code average rather than a valuation of this specific home."
-      : "This ZIP code is outside our coverage area, so this is a broad regional average only.",
+    degradedReason:
+      "We couldn't retrieve verified sales data for this property, so no automated estimate was produced.",
     comps: [],
     streetViewUrl: buildStreetViewUrl(address),
     fmr,
@@ -231,8 +219,8 @@ export async function POST(req: NextRequest) {
   // No upstream configured — don't burn a timeout discovering that.
   if (!VALUATION_API_URL) {
     const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
-    console.warn("[avm] VALUATION_API_URL not configured — serving ZIP average");
-    return respond(cacheKey, zipFallback(zipCode, fullAddress, areaMedianIncome, fmr));
+    console.warn("[avm] VALUATION_API_URL not configured — no valuation available");
+    return respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
   }
 
   try {
@@ -259,15 +247,15 @@ export async function POST(req: NextRequest) {
     const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
 
     if (!res.ok) {
-      console.error(`[avm] upstream returned ${res.status} — serving ZIP average`);
-      return respond(cacheKey, zipFallback(zipCode, fullAddress, areaMedianIncome, fmr));
+      console.error(`[avm] upstream returned ${res.status} — no valuation available`);
+      return respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
     }
 
     const data = await res.json();
 
     if (data.source === "estimate" || !data.average) {
-      console.warn("[avm] upstream had no property-level match — serving ZIP average");
-      return respond(cacheKey, zipFallback(zipCode, fullAddress, areaMedianIncome, fmr));
+      console.warn("[avm] upstream had no property-level match — no valuation available");
+      return respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
     }
 
     return respond(cacheKey, {
@@ -292,9 +280,9 @@ export async function POST(req: NextRequest) {
 
   } catch (err) {
     const reason = (err as Error)?.name === "AbortError" ? "timed out" : String(err);
-    console.error(`[avm] upstream unreachable (${reason}) — serving ZIP average`);
+    console.error(`[avm] upstream unreachable (${reason}) — no valuation available`);
     const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
-    return respond(cacheKey, zipFallback(zipCode, fullAddress, areaMedianIncome, fmr));
+    return respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
   }
 }
 

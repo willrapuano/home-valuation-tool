@@ -4,16 +4,16 @@ import { NextResponse } from "next/server";
  * Health check for uptime monitoring.
  *
  * The failure this exists to catch is the one that actually happened: the
- * valuation upstream disappeared and the tool kept returning HTTP 200 with a
- * ZIP-code average for months. A monitor pointed at the homepage would have
- * stayed green the whole time.
+ * valuation upstream disappeared and the tool kept returning HTTP 200 for
+ * months while producing no real valuations. A monitor pointed at the
+ * homepage would have stayed green the whole time.
  *
  * So this endpoint returns a NON-200 status when the tool cannot produce real
  * property-level valuations. Point an uptime monitor (Better Stack, Pingdom,
  * UptimeRobot, or a Vercel cron) at it and alert on non-200.
  *
  *   200 — healthy, property-level valuations working
- *   503 — degraded, serving fallbacks only
+ *   503 — no valuations available; visitors are routed to a manual CMA
  */
 
 const PROBE_TIMEOUT_MS = 5000;
@@ -49,7 +49,7 @@ async function checkValuationUpstream(): Promise<Check> {
     return {
       status: "not_configured",
       critical: true,
-      detail: "VALUATION_API_URL is unset — every valuation is a ZIP-code average.",
+      detail: "VALUATION_API_URL is unset — no valuations can be produced.",
     };
   }
 
@@ -185,7 +185,7 @@ export async function GET() {
       // Stated plainly so whoever reads the alert knows what users are seeing.
       summary: healthy
         ? "Property-level valuations are working."
-        : "Serving ZIP-code averages only — users are NOT getting property-level valuations.",
+        : "No valuations are being produced — every visitor is being routed to a manual CMA.",
       failing: criticalFailures,
       checks,
       timestamp: new Date().toISOString(),

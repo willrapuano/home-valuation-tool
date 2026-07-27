@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { AddressData, LeadData, ValuationData } from "../HomeValuationFlow";
+import PreparingValuation from "./PreparingValuation";
 
 interface Props {
   address: AddressData;
@@ -34,12 +35,44 @@ function ConfidenceBadge({ confidence }: { confidence: string }) {
           isHigh ? "bg-green-400" : "bg-yellow-400"
         }`}
       />
-      {isHigh ? "High Confidence" : "Area Estimate Only"}
+      {isHigh ? "High Confidence" : "Estimated"}
     </span>
   );
 }
 
 export default function Step4Results({ address, valuation, lead, onStartOver }: Props) {
+  // No property-level valuation — hand off to the prepared-by-agent screen
+  // rather than showing a number that isn't about this home.
+  if (valuation.degraded || valuation.estimate === null) {
+    return (
+      <PreparingValuation
+        address={address}
+        valuation={valuation}
+        lead={lead}
+        onStartOver={onStartOver}
+      />
+    );
+  }
+  return (
+    <FullResults
+      address={address}
+      valuation={valuation as ResolvedValuation}
+      lead={lead}
+      onStartOver={onStartOver}
+    />
+  );
+}
+
+/** A valuation that actually produced a number. */
+type ResolvedValuation = ValuationData & { estimate: number; low: number; high: number };
+
+/** Results layout for a real, property-level valuation. */
+function FullResults({
+  address,
+  valuation,
+  lead,
+  onStartOver,
+}: Omit<Props, "valuation"> & { valuation: ResolvedValuation }) {
   const [imgError, setImgError] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
@@ -94,7 +127,6 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
   const streetViewUrl =
     valuation.streetViewUrl ?? `/api/streetview?location=${encodeURIComponent(address.full)}`;
 
-  const isDegraded = valuation.degraded === true;
 
   const CMA_SUBJECT = encodeURIComponent(`Free CMA Request — ${address.full}`);
   const CMA_BODY = encodeURIComponent(
@@ -144,19 +176,11 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
         {/* Overlaid content */}
         <div className="absolute bottom-0 left-0 right-0 p-4 md:p-7">
           <p className="text-white/50 text-xs uppercase tracking-widest mb-1">
-            {isDegraded ? "Neighborhood Price Range" : "Estimated Market Value"}
+            Estimated Market Value
           </p>
-          {/* When we only have a ZIP average, showing a single precise figure
-              implies a property-level valuation we did not perform. */}
-          {isDegraded ? (
-            <p className="text-2xl md:text-4xl font-bold text-gold leading-none mb-2">
-              {formatCurrency(valuation.low)} – {formatCurrency(valuation.high)}
-            </p>
-          ) : (
-            <p className="text-3xl md:text-5xl font-bold text-gold leading-none mb-2">
-              {formatCurrency(valuation.estimate)}
-            </p>
-          )}
+          <p className="text-3xl md:text-5xl font-bold text-gold leading-none mb-2">
+            {formatCurrency(valuation.estimate)}
+          </p>
           <p className="text-white font-semibold text-base mb-1">
             {address.streetNumber} {address.streetName}
             <span className="text-white/40 font-normal text-sm ml-2">
@@ -217,38 +241,13 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
       </div>
 
       {/* ══════════════════════════════════════════════════════════════
-          1b. DEGRADED NOTICE — shown when we have no property-level data
-      ══════════════════════════════════════════════════════════════ */}
-      {isDegraded && (
-        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-400/10 p-4 md:p-5">
-          <div className="flex gap-3">
-            <svg className="w-5 h-5 shrink-0 text-yellow-400 mt-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="10" /><path d="M12 8v5M12 16h.01" />
-            </svg>
-            <div>
-              <p className="text-yellow-400 font-semibold text-sm">
-                This is a preliminary area estimate — not a valuation of your home
-              </p>
-              <p className="text-white/60 text-xs mt-1 leading-relaxed">
-                {valuation.degradedReason ??
-                  "Property-level data was unavailable for this address."}{" "}
-                It doesn&apos;t account for your home&apos;s size, condition, upgrades, or lot.
-                For an accurate figure, request a free CMA below — Candee prepares it by hand
-                from current market activity.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════════
           2. STAT ROW — 4 cards
       ══════════════════════════════════════════════════════════════ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {/* Property Value */}
         <div className="glass rounded-2xl p-4 gold-border text-center">
           <p className="text-white/40 text-xs uppercase tracking-wider mb-1">
-            {isDegraded ? "Area Midpoint" : "Property Value"}
+            Property Value
           </p>
           <p className="text-gold font-bold text-xl">{formatCurrency(valuation.estimate)}</p>
           <p className="text-white/30 text-xs mt-0.5">
@@ -367,12 +366,9 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
           <div className="text-right">
             <p className="text-white/40 text-xs">Annual Gross</p>
             <p className="text-white font-semibold">{formatCurrency(suggestedRent * 12)}</p>
-            {/* Yield against a ZIP average isn't a yield for this property. */}
-            {!isDegraded && (
-              <p className="text-white/30 text-xs mt-1">
-                ~{((suggestedRent * 12) / valuation.estimate * 100).toFixed(1)}% gross yield
-              </p>
-            )}
+            <p className="text-white/30 text-xs mt-1">
+              ~{((suggestedRent * 12) / valuation.estimate * 100).toFixed(1)}% gross yield
+            </p>
           </div>
         </div>
 

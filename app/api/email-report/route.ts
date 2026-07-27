@@ -123,17 +123,20 @@ export async function POST(req: NextRequest) {
     const contactId = searchData?.contacts?.[0]?.id;
 
     const addressFull = typeof address === "string" ? address : address?.full ?? "";
-    const valueSummary = estimate
+    const hasEstimate = !degraded && estimate != null;
+    const valueSummary = hasEstimate
       ? `$${Number(estimate).toLocaleString()} (range: $${Number(low).toLocaleString()} – $${Number(high).toLocaleString()})`
-      : "N/A";
+      : "No automated estimate — CMA required";
 
     const noteBody = [
-      `🏠 Home Valuation Report Requested`,
+      hasEstimate ? `🏠 Home Valuation Report Requested` : `🏠 CMA Requested — no automated estimate`,
       ``,
       `Property: ${addressFull}`,
       `Estimated Value: ${valueSummary}`,
-      degraded
-        ? `⚠️ AREA ESTIMATE ONLY — no property-level data was available, so the figure above is a ZIP-code average. Treat as a lead signal, not a valuation.`
+      // No number is sent when we couldn't value the property. The homeowner
+      // has been told a CMA is coming within 24 hours — this is the prompt.
+      !hasEstimate
+        ? `⚠️ ACTION REQUIRED: the tool could not value this property, so the homeowner was told Candee will send a CMA within 24 hours. No figure was shown to them.`
         : null,
       beds ? `Beds: ${beds}` : null,
       baths ? `Baths: ${baths}` : null,
@@ -142,13 +145,13 @@ export async function POST(req: NextRequest) {
       pricePerSqft ? `Price/Sqft: $${pricePerSqft}` : null,
       rentZestimate ? `Est. Rent: $${Number(rentZestimate).toLocaleString()}/mo` : null,
       ``,
-      `📎 Shareable Report: ${reportUrl}`,
+      hasEstimate ? `📎 Shareable Report: ${reportUrl}` : null,
     ].filter(Boolean).join("\n");
 
     const customFieldPayload = {
       property_address: addressFull,
       estimated_value: valueSummary,
-      report_url: reportUrl,
+      report_url: hasEstimate ? reportUrl : "",
     };
 
     if (contactId) {
@@ -156,7 +159,11 @@ export async function POST(req: NextRequest) {
         method: "PUT",
         headers,
         body: JSON.stringify({
-          tags: ["Home Valuation Lead", "Seller Lead", "Candee Currie - HVT", "HVT Email Report Requested"],
+          tags: [
+            "Home Valuation Lead", "Seller Lead", "Candee Currie - HVT", "HVT Email Report Requested",
+            // Lets Candee filter the leads that need a manual CMA before contact.
+            ...(hasEstimate ? [] : ["HVT Manual CMA Required"]),
+          ],
           customField: customFieldPayload,
         }),
       });
@@ -173,7 +180,11 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           email,
           source: "Home Valuation Tool",
-          tags: ["Home Valuation Lead", "Seller Lead", "Candee Currie - HVT", "HVT Email Report Requested"],
+          tags: [
+            "Home Valuation Lead", "Seller Lead", "Candee Currie - HVT", "HVT Email Report Requested",
+            // Lets Candee filter the leads that need a manual CMA before contact.
+            ...(hasEstimate ? [] : ["HVT Manual CMA Required"]),
+          ],
           customField: customFieldPayload,
         }),
       });
