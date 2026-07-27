@@ -49,6 +49,74 @@ The GHL note is flagged too, so the agent knows before calling the lead.
 **Do not remove that treatment.** Presenting a ZIP average as a property valuation
 is a misrepresentation, and the tool carries a licensed agent's name.
 
+## Comparables engine (`lib/comps`)
+
+A self-contained comps ranking and reconciliation engine. It is decoupled from
+any data source — it consumes candidate sales from a `CompsProvider` and knows
+nothing about where they came from, so a licensed MLS feed, county assessor
+records, or test fixtures all plug into the same logic.
+
+```ts
+import { valueFromComps, valueWithProvider } from "@/lib/comps";
+
+const result = valueFromComps(subject, candidateSales);
+// → { estimate, low, high, confidence, confidenceScore, comps, rejected, notes }
+```
+
+**How it works**
+
+1. **Knockout filters** — distance, sale recency, property-type substitutability,
+   GLA ratio band, and a cap on total adjustment size. Rejections are returned
+   with a human-readable reason rather than silently dropped.
+2. **Similarity scoring** — each comp is scored per dimension (distance, recency,
+   GLA, lot, vintage, rooms, subdivision, school zone, condition), then combined
+   using configurable weights. Dimensions with no data return `null` and are
+   dropped from the average rather than scored zero, so a missing lot size does
+   not make a comp look bad.
+3. **Adjustment grid** — appraisal-style dollar adjustments toward the subject,
+   including the market-time adjustment that is most often skipped and most
+   often material. Gross and net adjustment ratios are tracked separately.
+4. **Reconciliation** — a similarity-weighted mean, with the range derived from
+   how much the comps actually *disagree* rather than a fixed percentage.
+   Tightly clustered comps earn a narrow band; scattered ones produce a wide
+   one, which is the correct answer rather than a presentation failure.
+
+**Confidence** blends comp count, mean similarity, price dispersion, and mean
+adjustment size — and then lets disagreement *veto* the result. Comps that are
+physically near-identical but sold at wildly different prices score high on
+similarity yet tell you nothing, so agreement caps the final number rather than
+merely contributing to it.
+
+Market constants in `lib/comps/config.ts` (price per sqft, bath value,
+appreciation rate, etc.) are **documented assumptions calibrated for Northern
+Virginia**, not universal truths. Re-derive them by regression against closed
+sales before pointing this at another market.
+
+### Operational endpoints
+
+- **`GET /api/health`** — returns **503** when the tool cannot produce
+  property-level valuations, and 200 when it can. Point an uptime monitor at it
+  and alert on non-200. This exists because the original failure was invisible:
+  the upstream vanished and the tool kept returning HTTP 200 with ZIP averages
+  for months. A monitor on the homepage would have stayed green throughout.
+- **`/api/avm`** is cached (1h for real results, 60s for degraded so recovery is
+  picked up quickly) and rate limited (10 burst, ~1 per 6s sustained).
+
+Both the cache and the limiter are **per-instance in-process memory**. On Vercel
+each lambda keeps its own copy, so treat them as a speed bump, not a quota
+system. For an authoritative shared limit, back them with Vercel KV or Upstash —
+the interfaces in `lib/cache.ts` and `lib/rate-limit.ts` are small enough to swap.
+
+## Tests
+
+```bash
+npm test
+```
+
+Vitest, covering the comps engine (geo, scoring, adjustments, knockouts,
+ranking, reconciliation, confidence) and the cache/rate-limit infrastructure.
+The UI and API routes are not yet covered.
+
 ### Known limitation: the upstream is the weak link
 
 `VALUATION_API_URL` must point at a **stable hostname**. It was previously hardcoded to

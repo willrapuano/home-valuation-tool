@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { TtlCache, addressCacheKey } from "@/lib/cache";
+import { RateLimiter, clientKey } from "@/lib/rate-limit";
 
 /* ──────────────────────────────────────────────────────────────
    Upstream valuation service.
@@ -14,6 +16,18 @@ const VALUATION_API_KEY = process.env.VALUATION_API_KEY || "";
 
 const UPSTREAM_TIMEOUT_MS = 8000;
 const SIDECAR_TIMEOUT_MS = 4000;
+
+/**
+ * A property's value does not move meaningfully within an hour, and repeat
+ * lookups of the same address are common (users re-running the flow, embeds
+ * being refreshed). Caching keeps those off the paid upstream.
+ */
+const CACHE_TTL_MS = 60 * 60 * 1000;
+const valuationCache = new TtlCache<Record<string, unknown>>(CACHE_TTL_MS, 500);
+
+// 10 request burst, sustained ~1 every 6s. Comfortable for a human working
+// through the funnel; hostile to a script enumerating addresses.
+const limiter = new RateLimiter(10, 1 / 6);
 
 /** Fetch with a hard timeout so a dead upstream can't hold the function open. */
 async function fetchWithTimeout(
@@ -138,13 +152,13 @@ function zipFallback(
   address: string,
   areaMedianIncome: number | null,
   fmr: typeof NOVA_FMR_DEFAULT = NOVA_FMR_DEFAULT
-) {
+): Record<string, unknown> {
   const known = Object.prototype.hasOwnProperty.call(ZIP_ESTIMATES, zip);
   const base = ZIP_ESTIMATES[zip] || 650000;
   // Widen the band when we don't even have the ZIP — a ±4% range implies a
   // precision this method does not have.
   const spread = known ? 0.12 : 0.25;
-  return NextResponse.json({
+  return {
     estimate: base,
     low: Math.floor(base * (1 - spread)),
     high: Math.ceil(base * (1 + spread)),
@@ -160,12 +174,34 @@ function zipFallback(
     areaMedianIncome,
     pricePerSqft: null, rentZestimate: null,
     beds: null, baths: null, sqft: null, yearBuilt: null, homeType: null,
-  });
+  };
+}
+
+/**
+ * Cache and return. Degraded payloads get a much shorter TTL — a degraded
+ * result means something upstream is broken, and we want the first request
+ * after recovery to see real data rather than a stale fallback.
+ */
+const DEGRADED_TTL_MS = 60 * 1000;
+
+function respond(cacheKey: string | null, payload: Record<string, unknown>) {
+  if (cacheKey) {
+    valuationCache.set(cacheKey, payload, payload.degraded ? DEGRADED_TTL_MS : undefined);
+  }
+  return NextResponse.json(payload);
 }
 
 /* ── Route ─────────────────────────────────────────────────────── */
 
 export async function POST(req: NextRequest) {
+  const rate = limiter.check(clientKey(req.headers));
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many requests. Please wait a moment and try again." },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfter) } }
+    );
+  }
+
   const body = await req.json().catch(() => ({}));
   const { address, zipCode, city, state, fullAddress: passedFullAddress } = body;
 
@@ -182,6 +218,13 @@ export async function POST(req: NextRequest) {
   }
 
   const fullAddress = passedFullAddress || [address, city, state, zipCode].filter(Boolean).join(", ");
+
+  const cacheKey = addressCacheKey({ address, city, state, zipCode });
+  const cached = valuationCache.get(cacheKey);
+  if (cached) {
+    return NextResponse.json({ ...cached, cached: true });
+  }
+
   const amiPromise = fetchZipMedianIncome(zipCode);
   const fmrPromise = fetchHudFMR(zipCode, state || "VA");
 
@@ -189,7 +232,7 @@ export async function POST(req: NextRequest) {
   if (!VALUATION_API_URL) {
     const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
     console.warn("[avm] VALUATION_API_URL not configured — serving ZIP average");
-    return zipFallback(zipCode, fullAddress, areaMedianIncome, fmr);
+    return respond(cacheKey, zipFallback(zipCode, fullAddress, areaMedianIncome, fmr));
   }
 
   try {
@@ -217,17 +260,17 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       console.error(`[avm] upstream returned ${res.status} — serving ZIP average`);
-      return zipFallback(zipCode, fullAddress, areaMedianIncome, fmr);
+      return respond(cacheKey, zipFallback(zipCode, fullAddress, areaMedianIncome, fmr));
     }
 
     const data = await res.json();
 
     if (data.source === "estimate" || !data.average) {
       console.warn("[avm] upstream had no property-level match — serving ZIP average");
-      return zipFallback(zipCode, fullAddress, areaMedianIncome, fmr);
+      return respond(cacheKey, zipFallback(zipCode, fullAddress, areaMedianIncome, fmr));
     }
 
-    return NextResponse.json({
+    return respond(cacheKey, {
       estimate: data.average,
       low: data.low,
       high: data.high,
@@ -251,7 +294,7 @@ export async function POST(req: NextRequest) {
     const reason = (err as Error)?.name === "AbortError" ? "timed out" : String(err);
     console.error(`[avm] upstream unreachable (${reason}) — serving ZIP average`);
     const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
-    return zipFallback(zipCode, fullAddress, areaMedianIncome, fmr);
+    return respond(cacheKey, zipFallback(zipCode, fullAddress, areaMedianIncome, fmr));
   }
 }
 
