@@ -118,6 +118,24 @@ names, so they should keep passing.
 Once configured, `/api/health` reports TitleFlex reachability and distinguishes
 an auth failure from a wrong endpoint path.
 
+#### Discovering the integration details
+
+You don't need vendor documentation to configure this. With a live key:
+
+```bash
+TITLEFLEX_API_URL=https://... TITLEFLEX_API_KEY=... npm run probe:titleflex
+```
+
+The probe tries the plausible combinations of auth shape, endpoint path and HTTP
+method, reports which one the API accepts, then reconciles the field mapping
+against the real response — printing the exact env vars to set and which fields
+resolved. The API key is never printed. `--save` writes the raw response to a
+gitignored file.
+
+Questions the probe *can't* answer — licensing, resale scope, rate limits,
+pricing — are written up ready to send in
+[`docs/titleflex-questions.md`](docs/titleflex-questions.md).
+
 **Two open questions with DataTrace before this goes live:**
 
 1. Which endpoint returns nearby *closed sales* for a radius + date window. If
