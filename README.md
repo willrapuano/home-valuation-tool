@@ -32,7 +32,7 @@ A multi-step home valuation lead capture tool built for Candee Currie (TTR Sothe
 | Layer | Source | Required key | If missing |
 |---|---|---|---|
 | Address autocomplete | Nominatim (OpenStreetMap) | none | — |
-| Property valuation | `VALUATION_API_URL` upstream | `VALUATION_API_KEY` | Falls back to ZIP average, flagged `degraded` |
+| Property valuation | `VALUATION_API_URL` upstream | `VALUATION_API_KEY` | No estimate returned; UI routes to a manual CMA |
 | Median household income | Census ACS 5-year | `CENSUS_API_KEY` | Field hidden |
 | Fair Market Rents | HUD FMR API | `HUD_API_TOKEN` | Static NoVA averages |
 | Property imagery | Google Street View via `/api/streetview` | `GOOGLE_MAPS_API_KEY` | Placeholder tile |
@@ -60,9 +60,9 @@ CMA offer rather than on the estimate.
 
 `VALUATION_API_URL` must point at a **stable hostname**. It was previously hardcoded to
 a `*.trycloudflare.com` Quick Tunnel, which is assigned a fresh random URL on every
-restart. When that tunnel dropped, every valuation silently became a ZIP-code average
-and nothing surfaced it. Use a named Cloudflare tunnel or a hosted API, and add an
-uptime check against `/api/avm`.
+restart. When that tunnel dropped, the tool silently stopped producing valuations
+and nothing surfaced it. Use a named Cloudflare tunnel or a hosted API, and point an
+uptime monitor at `/api/health`, which returns 503 in that state.
 
 ---
 
@@ -86,8 +86,8 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
-The tool runs without any keys set — it will serve clearly-labelled degraded
-estimates so you can work on the funnel without credentials.
+The tool runs without any keys set — with no valuation upstream it routes to the
+prepared-CMA screen, so you can work on the funnel without credentials.
 
 ---
 
@@ -97,8 +97,9 @@ estimates so you can work on the funnel without credentials.
   git history should be considered compromised and rotated.
 - The Google Maps key is server-side only, proxied through `/api/streetview`, and
   should be restricted by API rather than by HTTP referrer.
-- `/api/avm` is public and unauthenticated. It is worth adding rate limiting before
-  driving significant traffic to it.
+- `/api/avm` is public and unauthenticated, rate limited per client in-process
+  (10 burst, ~1 per 6s). That is per-instance on Vercel — back it with Vercel KV or
+  Upstash if you need an authoritative limit.
 - Shareable report URLs are unsigned base64 — the values in them can be edited by
   the recipient. Sign them before treating a report link as authoritative.
 
