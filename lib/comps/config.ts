@@ -29,6 +29,21 @@ export interface MarketConfig {
    * Fairfax. Somewhere assessing at a fraction of market, raise accordingly.
    */
   saleToAssessedRatio: number;
+  /**
+   * How far to trust assessed value over physical characteristics, in [0,1],
+   * when both are available for a comp and the subject.
+   *
+   * Not a preference — a measurement. Where the assessor reassesses annually
+   * at full market value the assessment is close to a free appraisal and beats
+   * any three-term regression (Fairfax: 5.2% median error on assessments
+   * alone). Where assessments are stale the same number is actively
+   * misleading: Maryland works on a three-year cycle, and in the counties
+   * whose turn has not come round the physical grid measurably wins.
+   *
+   * Derived per request from the dispersion of local sale-to-assessment
+   * ratios, so no jurisdiction needs to be configured by hand.
+   */
+  assessmentWeight: number;
 }
 
 export const NOVA_MARKET: MarketConfig = {
@@ -40,6 +55,9 @@ export const NOVA_MARKET: MarketConfig = {
   perConditionPoint: 25000,
   annualAppreciation: 0.04,
   saleToAssessedRatio: 1.0,
+  // Fairfax publishes no building characteristics, so in its home market this
+  // is the only usable basis anyway. Calibration overrides it elsewhere.
+  assessmentWeight: 1.0,
 };
 
 /** Weight of each similarity dimension. Normalised at use, so relative size is what matters. */
@@ -116,6 +134,24 @@ export interface EngineOptions {
   maxBandRatio: number;
   /** Evaluation date for recency and time adjustments (ISO). Defaults to today. */
   asOf?: string;
+  /**
+   * Fit `market` to the candidate pool before adjusting, instead of using the
+   * constants above verbatim. On by default: the defaults are Northern
+   * Virginia numbers, and applying them unchanged in Bethesda understated
+   * every size adjustment by roughly 60%.
+   *
+   * Passing an explicit `market` override disables this — a caller who has
+   * measured their own constants is not second-guessed.
+   */
+  calibrate?: boolean;
+  /**
+   * Constants to pin AFTER calibration, leaving the rest measured.
+   *
+   * For a caller who knows one number for certain — a published assessment
+   * ratio, say — without wanting to supply a whole `MarketConfig` and lose
+   * calibration of everything else.
+   */
+  marketOverrides?: Partial<MarketConfig>;
 }
 
 export const DEFAULT_OPTIONS: EngineOptions = {
@@ -139,6 +175,7 @@ export const DEFAULT_OPTIONS: EngineOptions = {
   bandMultiplier: 2.5,
   minBandRatio: 0.04,
   maxBandRatio: 0.4,
+  calibrate: true,
 };
 
 /**

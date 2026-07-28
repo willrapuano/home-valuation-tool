@@ -1,4 +1,5 @@
 import { adjustComp } from "./adjust";
+import { calibrateMarket } from "./calibrate";
 import {
   DEFAULT_OPTIONS,
   EngineOptions,
@@ -35,27 +36,61 @@ export function valueFromComps(
   candidates: ComparableSale[],
   overrides: Partial<EngineOptions> = {}
 ): ValuationResult {
-  const opts: EngineOptions = { ...DEFAULT_OPTIONS, ...overrides };
-  const asOf = opts.asOf ?? new Date().toISOString().slice(0, 10);
+  const base: EngineOptions = { ...DEFAULT_OPTIONS, ...overrides };
+  const asOf = base.asOf ?? new Date().toISOString().slice(0, 10);
+
+  // Fit the adjustment constants to this market before adjusting anything.
+  // An explicit `market` override means the caller has measured it themselves,
+  // so it is treated as final rather than as a starting point.
+  const calibration =
+    base.calibrate === false || overrides.market
+      ? null
+      : calibrateMarket(candidates, base.market, asOf);
+
+  const opts: EngineOptions = {
+    ...base,
+    market: {
+      ...(calibration ? calibration.market : base.market),
+      ...(base.marketOverrides ?? {}),
+    },
+  };
 
   const rejected: { comp: ComparableSale; reason: string }[] = [];
   const scored: ScoredComp[] = [];
+  const notes: string[] = calibration ? [...calibration.notes] : [];
+  let strippedAssessments = 0;
 
   // Needs the whole candidate set, so it can't live in the per-comp knockout.
   const ratioBand = assessmentRatioBand(candidates, opts);
 
-  for (const comp of candidates) {
+  for (const raw of candidates) {
+    let comp = raw;
+
     if (ratioBand && comp.assessedValue) {
       const ratio = comp.soldPrice / comp.assessedValue;
       if (ratio < ratioBand.min || ratio > ratioBand.max) {
-        rejected.push({
-          comp,
-          reason:
-            `sold at ${ratio.toFixed(2)}× assessed value, outside the local ` +
-            `${ratioBand.min.toFixed(2)}–${ratioBand.max.toFixed(2)}× band ` +
-            `(likely a teardown, renovation or non-market transfer)`,
-        });
-        continue;
+        // Two very different things look identical here: a sale that was not
+        // arm's-length, and a sale that was perfectly ordinary against an
+        // assessment record that is stale or land-only. Maryland publishes
+        // $1,200 assessments on houses that sold for $1.4M, so treating every
+        // outlier as a bad sale threw away a quarter of the usable comps.
+        //
+        // Square footage breaks the tie: if the price is normal for the size
+        // of the house, the assessment is the unreliable number, so drop the
+        // assessment and keep the sale.
+        if (looksNormalForSize(comp, calibration?.medianPricePerSqft)) {
+          comp = { ...comp, assessedValue: undefined };
+          strippedAssessments++;
+        } else {
+          rejected.push({
+            comp,
+            reason:
+              `sold at ${ratio.toFixed(2)}× assessed value, outside the local ` +
+              `${ratioBand.min.toFixed(2)}–${ratioBand.max.toFixed(2)}× band ` +
+              `(likely a teardown, renovation or non-market transfer)`,
+          });
+          continue;
+        }
       }
     }
 
@@ -107,11 +142,34 @@ export function valueFromComps(
     maxBandRatio: opts.maxBandRatio,
   });
 
+  result.notes.unshift(...notes);
+
+  if (strippedAssessments) {
+    result.notes.push(
+      `${strippedAssessments} comp(s) kept but valued on physical characteristics ` +
+        `only, their assessment records being implausible.`
+    );
+  }
   if (rejected.length) {
     result.notes.push(`${rejected.length} candidate(s) excluded by filters.`);
   }
 
-  return { ...result, comps: selected, rejected };
+  return { ...result, comps: selected, rejected, market: opts.market };
+}
+
+/**
+ * Is this sale price ordinary for a house of this size in this market?
+ *
+ * Used only to decide whether a wild sale-to-assessment ratio indicts the sale
+ * or the assessment. Deliberately loose — it is asking "is this within the
+ * range of normal", not "is this the right price".
+ */
+function looksNormalForSize(comp: ComparableSale, medianPricePerSqft?: number): boolean {
+  if (!comp.sqft || comp.sqft <= 300 || !medianPricePerSqft || medianPricePerSqft <= 0) {
+    return false;
+  }
+  const ratio = comp.soldPrice / (comp.sqft * medianPricePerSqft);
+  return ratio >= 0.45 && ratio <= 2.2;
 }
 
 /**

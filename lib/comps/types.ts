@@ -92,6 +92,12 @@ export interface ValuationResult {
   rejected: { comp: ComparableSale; reason: string }[];
   /** Human-readable notes about how the estimate was reached. */
   notes: string[];
+  /**
+   * The market constants actually used, after calibration against the local
+   * sales. Present so a surprising estimate can be traced to the numbers
+   * behind it rather than guessed at.
+   */
+  market?: import("./config").MarketConfig;
 }
 
 /**
