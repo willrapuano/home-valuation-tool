@@ -4,8 +4,6 @@ import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 
-const GMAPS_KEY = "AIzaSyC-JJ1EHFKypH-RMQaemYKSp2ZrXoGVcP8";
-
 type AddressData = {
   full: string;
   streetNumber: string;
@@ -18,11 +16,12 @@ type AddressData = {
 };
 
 type ValuationData = {
-  estimate: number;
-  low: number;
-  high: number;
+  estimate: number | null;
+  low: number | null;
+  high: number | null;
   confidence: string;
   source: string;
+  degraded?: boolean;
   fmr?: {
     studio: number;
     oneBr: number;
@@ -152,11 +151,40 @@ function ReportContent() {
     );
   }
 
-  const { address, valuation } = data;
+  const { address } = data;
 
-  const streetViewUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${encodeURIComponent(
-    address.full
-  )}&key=${GMAPS_KEY}`;
+  // A report is only ever generated for a real valuation. If a link somehow
+  // carries a degraded payload, say so rather than rendering an empty figure.
+  if (data.valuation.degraded || data.valuation.estimate == null || data.valuation.low == null || data.valuation.high == null) {
+    return (
+      <div className="min-h-screen bg-navy flex items-center justify-center px-4">
+        <div className="text-center max-w-md">
+          <p className="text-4xl mb-4">🏡</p>
+          <h1 className="text-white font-bold text-2xl mb-2">Valuation in progress</h1>
+          <p className="text-white/50 text-sm mb-6">
+            No automated estimate was available for {address.full}. Candee is preparing a
+            comparative market analysis by hand and will be in touch directly.
+          </p>
+          <a
+            href="tel:+17032036005"
+            className="gold-gradient text-navy font-bold px-6 py-3 rounded-xl text-sm hover:opacity-90 transition-all"
+          >
+            Call Candee — (703) 203-6005
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Narrowed by the guard above: a report only ever renders a resolved valuation.
+  const valuation = data.valuation as ValuationData & {
+    estimate: number;
+    low: number;
+    high: number;
+  };
+
+  // Proxied so the Maps key stays server-side.
+  const streetViewUrl = `/api/streetview?location=${encodeURIComponent(address.full)}`;
 
   const fmr = valuation.fmr ?? {
     studio: 2050,

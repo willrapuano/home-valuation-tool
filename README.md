@@ -2,10 +2,8 @@
 
 A multi-step home valuation lead capture tool built for Candee Currie (TTR Sotheby's International Realty). Built to be resold to multiple agents as a Velocity Builders product.
 
-## Live Demo
-🔗 [Deployed on Vercel] — URL in deployment-status.json
-
 ## Embeddable iFrame
+
 ```html
 <iframe
   src="https://home-valuation-tool.vercel.app"
@@ -22,29 +20,92 @@ A multi-step home valuation lead capture tool built for Candee Currie (TTR Sothe
 
 ## User Flow
 
-1. **Step 1 — Address Entry** — Google Places autocomplete + optional sqft
-2. **Step 2 — Loading** — Animated processing screen, fetches AVM data in background
-3. **Step 3 — Lead Gate** — Captures name/email/phone before showing results
-4. **Step 4 — Results** — Value range, comps, agent CTA card
+1. **Step 1 — Address Entry** — OpenStreetMap/Nominatim autocomplete
+2. **Step 2 — Loading** — Progress screen; races the real AVM request (2.5s floor, 8s cap)
+3. **Step 3 — Lead Gate** — Captures email before showing results
+4. **Step 4 — Results** — Value range, rental analysis, agent CTA card
 
 ---
 
-## Required API Keys
+## Where the data comes from
 
-| Key | Status | Purpose |
-|-----|--------|---------|
-| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | ✅ Configured | Address autocomplete |
-| `GHL_API_KEY` | ✅ Configured | Lead push to GoHighLevel |
-| `GHL_LOCATION_ID` | ✅ Configured | GHL location targeting |
-| `REPLIERS_API_KEY` | ❌ **MISSING** | Real AVM + comps data |
+| Layer | Source | Required key | If missing |
+|---|---|---|---|
+| Address autocomplete | Nominatim (OpenStreetMap) | none | — |
+| Property valuation (Fairfax) | County records + our comps engine | none | Falls through to the upstream below |
+| Property valuation (elsewhere) | `VALUATION_API_URL` upstream | `VALUATION_API_KEY` | No estimate returned; UI routes to a manual CMA |
+| Median household income | Census ACS 5-year | `CENSUS_API_KEY` | Field hidden |
+| Fair Market Rents | HUD FMR API | `HUD_API_TOKEN` | Rental section hidden entirely |
+| Property imagery | Google Street View via `/api/streetview` | `GOOGLE_MAPS_API_KEY` | Placeholder tile |
+| Lead capture | GoHighLevel | `GHL_API_KEY` | No-op, flow still completes |
 
-### Missing: Repliers API Key
-Without `REPLIERS_API_KEY`, the tool falls back to a price-per-sqft estimate algorithm using a NoVA zip code table. Results will show "Medium Confidence" and recommend a CMA.
+### When no valuation is available
 
-**To enable real Repliers data:**
-1. Log into https://app.repliers.io
-2. Go to Settings → API Keys
-3. Copy the key and add to Vercel environment variables as `REPLIERS_API_KEY`
+`/api/avm` returns `degraded: true` with **`estimate`, `low` and `high` all null**
+when it cannot value the specific property. It does not substitute an area
+average — an earlier version returned a ZIP-code figure here, which meant every
+home in 22101 came back at $1,200,000 whether it was a mansion or a teardown.
+
+The UI switches to a "valuation being prepared" screen (`PreparingValuation.tsx`)
+that shows no number at all and commits to an agent-prepared CMA within 24 hours.
+The lead gate adapts too, so it never promises a figure the next screen can't
+deliver. The lead is still captured and pushed to the CRM, tagged
+`HVT Manual CMA Required`, with a note telling the agent what the homeowner was
+promised.
+
+**Do not reintroduce a placeholder number here.** A figure that isn't about the
+subject property has no business on the screen, and the funnel converts on the
+CMA offer rather than on the estimate.
+
+### Detecting when the county source breaks
+
+The Fairfax endpoints are undocumented public GIS services — no versioning, no
+deprecation policy, no SLA. They can change without notice, and every way they
+can break produces the *same* output as a legitimately out-of-area address:
+a degraded valuation and an HTTP 200. That is the real risk, and it is the
+failure that already cost this project months once.
+
+Three layers make it loud instead of silent:
+
+**Schema assertion.** `FairfaxSchemaError` is thrown when a layer responds
+successfully but without `PIN`/`SALEDT`/`PRICE`/`LUC`/`APRTOT`. Without it, a
+renamed column produces records that get silently dropped, and zero comps looks
+identical to no sales nearby.
+
+**Health canary.** `/api/health` values a known McLean parcel and reports the
+specific cause when it can't:
+
+```
+countyComps  ok  142 sales, newest 10d old, 78% land use mapped,
+                 median ratio 1.045, assessment year 2026
+```
+
+It also catches the two failures that produce *no error at all*:
+
+- **Stalled feed** — sales still return, they're just all old. Fails when the
+  newest sale in a 1.5-mile radius is over 60 days old.
+- **Ratio drift** — Fairfax reassesses every January. Estimates ride on the
+  sale-to-assessment ratio, so a reassessment moves every valuation while the
+  tool keeps reporting high confidence. Warns when the median leaves 0.9–1.4,
+  and `taxYear` makes the step visible.
+
+**Scheduled CI** (`.github/workflows/data-source-canary.yml`) runs the canary
+daily so a break surfaces there rather than in a homeowner's browser.
+
+```bash
+npx tsx scripts/fairfax-canary.ts   # exits non-zero when the source is broken
+```
+
+`/api/health` returns 200 when *any* valuation route works and 503 when none
+do — county comps cover Fairfax, the external upstream covers everywhere else.
+
+### Known limitation: the upstream is the weak link
+
+`VALUATION_API_URL` must point at a **stable hostname**. It was previously hardcoded to
+a `*.trycloudflare.com` Quick Tunnel, which is assigned a fresh random URL on every
+restart. When that tunnel dropped, the tool silently stopped producing valuations
+and nothing surfaced it. Use a named Cloudflare tunnel or a hosted API, and point an
+uptime monitor at `/api/health`, which returns 503 in that state.
 
 ---
 
@@ -53,7 +114,6 @@ Without `REPLIERS_API_KEY`, the tool falls back to a price-per-sqft estimate alg
 - **Framework:** Next.js 14 (App Router)
 - **Styling:** Tailwind CSS
 - **Brand:** Navy #0B1D3A + Gold #C9A84C (Sotheby's palette)
-- **APIs:** Google Places, Repliers IDX, GoHighLevel CRM
 - **Deploy:** Vercel
 
 ---
@@ -69,6 +129,24 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
+The tool runs without any keys set. Fairfax County addresses are valued from
+public records with no credentials at all; everything else routes to the
+prepared-CMA screen.
+
+---
+
+## Security notes
+
+- API keys must live in env vars only. Keys previously committed to this repo's
+  git history should be considered compromised and rotated.
+- The Google Maps key is server-side only, proxied through `/api/streetview`, and
+  should be restricted by API rather than by HTTP referrer.
+- `/api/avm` is public and unauthenticated, rate limited per client in-process
+  (10 burst, ~1 per 6s). That is per-instance on Vercel — back it with Vercel KV or
+  Upstash if you need an authoritative limit.
+- Shareable report URLs are unsigned base64 — the values in them can be edited by
+  the recipient. Sign them before treating a report link as authoritative.
+
 ---
 
 ## Reselling to Other Agents
@@ -82,15 +160,8 @@ To deploy for a new agent, update these env vars:
 - `GHL_API_KEY` (agent's GHL account)
 - Replace `/public/candee-headshot.png` with agent headshot
 
----
-
-## GHL Pipeline Setup
-
-To fully enable GHL pipeline creation:
-1. In GHL, create a pipeline named "Home Valuation Leads"
-2. Add a stage "New Lead"
-3. Copy the Pipeline ID and Stage ID from GHL Settings
-4. Add to `app/api/lead/route.ts` at the `pipelineId` and `pipelineStageId` fields
+Note: agent details are currently still hardcoded in `HomeValuationFlow.tsx` and
+`Step4Results.tsx`. Wiring them to the env vars above is a prerequisite for resale.
 
 ---
 

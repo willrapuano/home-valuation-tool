@@ -1,5 +1,8 @@
 {
   "compilerOptions": {
+    // Next 14 runs on Node 18+ and modern browsers; the implicit ES5 default
+    // blocked Map/Set iteration for no benefit.
+    "target": "es2017",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,

@@ -29,6 +29,10 @@ yarn-error.log*
 .env*.local
 .env
 
+# vendor API responses captured by scripts/titleflex-probe.ts --save
+# may contain licensed data; keep out of git
+.titleflex-sample.json
+
 # vercel
 .vercel
 
