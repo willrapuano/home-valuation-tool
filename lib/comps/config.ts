@@ -103,6 +103,17 @@ export interface EngineOptions {
   targetCompCount: number;
   /** Below this many usable comps, refuse to produce an estimate. */
   minCompCount: number;
+  /**
+   * Multiplier on comp dispersion when forming the published range, and the
+   * floor/ceiling on its width as a fraction of the estimate.
+   *
+   * Calibrated against closed sales: the range should contain the eventual
+   * sale price about as often as it claims to. These were previously defined
+   * only inside reconcile() and never passed through, so they had no effect.
+   */
+  bandMultiplier: number;
+  minBandRatio: number;
+  maxBandRatio: number;
   /** Evaluation date for recency and time adjustments (ISO). Defaults to today. */
   asOf?: string;
 }
@@ -120,6 +131,14 @@ export const DEFAULT_OPTIONS: EngineOptions = {
   maxAssessmentRatioDeviation: 0.25,
   targetCompCount: 6,
   minCompCount: 3,
+  // Calibrated against 180 closed Fairfax sales. At 1.5 the range contained
+  // the eventual sale price only 67% of the time — a range that is wrong a
+  // third of the time is not a range. 2.5 lifts that to ~84% at a median
+  // width of ~28%. Wide, but true; the same argument that removed the ZIP
+  // average applies here.
+  bandMultiplier: 2.5,
+  minBandRatio: 0.04,
+  maxBandRatio: 0.4,
 };
 
 /**

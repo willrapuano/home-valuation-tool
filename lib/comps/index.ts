@@ -100,7 +100,12 @@ export function valueFromComps(
   scored.sort((a, b) => b.score - a.score);
   const selected = scored.slice(0, opts.targetCompCount);
 
-  const result = reconcile(selected, { minCompCount: opts.minCompCount });
+  const result = reconcile(selected, {
+    minCompCount: opts.minCompCount,
+    bandMultiplier: opts.bandMultiplier,
+    minBandRatio: opts.minBandRatio,
+    maxBandRatio: opts.maxBandRatio,
+  });
 
   if (rejected.length) {
     result.notes.push(`${rejected.length} candidate(s) excluded by filters.`);
