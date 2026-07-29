@@ -21,6 +21,11 @@ class FakeKv implements KvStore {
     this.writes++;
     this.store.set(key, value);
   }
+  async incr(key: string): Promise<number | null> {
+    const next = Number(this.store.get(key) ?? 0) + 1;
+    this.store.set(key, next);
+    return next;
+  }
 }
 
 class BrokenKv implements KvStore {
@@ -29,6 +34,9 @@ class BrokenKv implements KvStore {
     throw new Error("connection refused");
   }
   async set<T>(): Promise<void> {
+    throw new Error("connection refused");
+  }
+  async incr(): Promise<number | null> {
     throw new Error("connection refused");
   }
 }
@@ -98,6 +106,24 @@ describe("TieredKv", () => {
 
   it("returns null for a key that was never written", async () => {
     expect(await new TieredKv(new FakeKv(), new FakeKv()).get("nope")).toBeNull();
+  });
+
+  it("refuses to count without a shared store", async () => {
+    // A counter that only sees one lambda is not a smaller total, it is a
+    // wrong one. Returning null makes /api/events say so instead of guessing.
+    expect(await new TieredKv(new FakeKv()).incr("ev:x")).toBeNull();
+  });
+
+  it("counts through the shared store when there is one", async () => {
+    const remote = new FakeKv();
+    const kv = new TieredKv(new FakeKv(), remote);
+    expect(await kv.incr("ev:x")).toBe(1);
+    expect(await kv.incr("ev:x")).toBe(2);
+  });
+
+  it("swallows a counter failure rather than breaking the caller", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await new TieredKv(new FakeKv(), new BrokenKv()).incr("ev:x")).toBeNull();
   });
 });
 
