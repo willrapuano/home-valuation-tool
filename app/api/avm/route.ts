@@ -8,6 +8,8 @@ import type { CompsProvider, SubjectProperty } from "@/lib/comps/types";
 import { FairfaxCountyProvider } from "@/lib/comps/providers/fairfax";
 import { MarylandProvider } from "@/lib/comps/providers/maryland";
 import { DcProvider } from "@/lib/comps/providers/dc";
+import { PostgresProvider } from "@/lib/comps/providers/postgres";
+import { hasDatabase } from "@/lib/db";
 
 /* ──────────────────────────────────────────────────────────────
    Upstream valuation service.
@@ -164,12 +166,26 @@ const LOOKBACK_MONTHS = 12;
 const COVERAGE: {
   name: string;
   bbox: { minLat: number; maxLat: number; minLng: number; maxLng: number };
+  /** Skip entirely when unconfigured, rather than failing a query per request. */
+  enabled?: () => boolean;
   create: () => CompsProvider & {
     lookupSubject(location: { lat: number; lng: number }): Promise<
       (Partial<SubjectProperty> & { lastSalePrice?: number; lastSaleDate?: string }) | null
     >;
   };
 }[] = [
+  {
+    // Our own ingested copy, when there is one. First because it is one
+    // indexed spatial query rather than two to four third-party round trips —
+    // and because when it has no rows for a location it simply produces no
+    // valuation and the live providers below answer instead. Nationwide
+    // bounding box: coverage is decided by what has actually been ingested,
+    // not by geography.
+    name: "postgres",
+    bbox: { minLat: 24, maxLat: 50, minLng: -125, maxLng: -66 },
+    create: () => new PostgresProvider(),
+    enabled: () => hasDatabase(),
+  },
   {
     name: "fairfax",
     bbox: { minLat: 38.55, maxLat: 39.08, minLng: -77.56, maxLng: -77.0 },
@@ -193,7 +209,10 @@ const COVERAGE: {
 
 function providersFor(lat: number, lng: number) {
   return COVERAGE.filter(
-    c => lat >= c.bbox.minLat && lat <= c.bbox.maxLat && lng >= c.bbox.minLng && lng <= c.bbox.maxLng
+    c =>
+      (c.enabled?.() ?? true) &&
+      lat >= c.bbox.minLat && lat <= c.bbox.maxLat &&
+      lng >= c.bbox.minLng && lng <= c.bbox.maxLng
   );
 }
 

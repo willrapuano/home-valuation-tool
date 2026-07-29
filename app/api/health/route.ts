@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { checkFairfaxHealth } from "@/lib/comps/providers/fairfax";
 import { hasSharedCache } from "@/lib/kv";
+import { hasDatabase } from "@/lib/db";
+import { ingestFreshness } from "@/lib/comps/providers/postgres";
 
 /**
  * Health check for uptime monitoring.
@@ -192,6 +194,16 @@ function checkCrm(): Check {
     : { status: "not_configured", critical: false, detail: "GHL_API_KEY unset — leads are not being captured." };
 }
 
+/** Ingested-data freshness, or null when running purely on live sources. */
+async function datastoreStatus() {
+  if (!hasDatabase()) return { configured: false as const };
+  try {
+    return { configured: true as const, jurisdictions: await ingestFreshness() };
+  } catch (err) {
+    return { configured: true as const, error: (err as Error)?.message ?? "unreachable" };
+  }
+}
+
 export async function GET() {
   const [countyComps, valuation, census, hud, titleflex] = await Promise.all([
     checkCountyComps(),
@@ -236,6 +248,9 @@ export async function GET() {
       // store the cache still works, but only within one instance — see
       // lib/kv.ts for why that measurably matters.
       sharedCache: hasSharedCache(),
+      // Serving from our own copy is only better than the live sources while
+      // that copy is fresh; stale comps degrade silently, so say how old.
+      datastore: await datastoreStatus(),
       failing: criticalFailures,
       checks,
       timestamp: new Date().toISOString(),
