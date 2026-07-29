@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkFairfaxHealth } from "@/lib/comps/providers/fairfax";
+import { PROVIDER_PROBES, checkProviderHealth } from "@/lib/comps/providers/health";
 import { hasSharedCache } from "@/lib/kv";
 import { hasDatabase } from "@/lib/db";
 import { ingestFreshness } from "@/lib/comps/providers/postgres";
@@ -152,6 +153,52 @@ async function checkTitleFlex(): Promise<Check> {
  * source. Every way this can break currently produces the same output as a
  * legitimately out-of-area address, so the canary reports the specific cause.
  */
+/**
+ * All public-records sources, not just Fairfax.
+ *
+ * This endpoint reported `workingSources: ["countyComps"]` on the strength of
+ * Fairfax alone while DC and Maryland went unchecked — so Maryland's iMAP
+ * could have been down and health would still have said "ok".
+ */
+async function checkAllProviders(): Promise<Record<string, Check>> {
+  const results = await Promise.all(
+    PROVIDER_PROBES.map(p =>
+      checkProviderHealth(p).catch(err => ({
+        jurisdiction: p.jurisdiction,
+        ok: false,
+        failures: [`Check threw: ${(err as Error)?.message}`],
+        warnings: [] as string[],
+        compCount: 0,
+        newestSaleDate: null,
+        daysSinceNewestSale: null,
+        assessedCoverage: 0,
+        subjectLookupOk: false,
+        latencyMs: 0,
+      }))
+    )
+  );
+
+  const out: Record<string, Check> = {};
+  for (const h of results) {
+    out[`comps_${h.jurisdiction}`] = {
+      status: h.ok ? ("ok" as const) : ("degraded" as const),
+      // Any ONE jurisdiction being down is critical for the homeowners in it,
+      // even though the others still work.
+      critical: true,
+      detail: h.ok
+        ? [
+            `${h.compCount} sales`,
+            h.daysSinceNewestSale !== null ? `newest ${h.daysSinceNewestSale}d old` : null,
+            `${(h.assessedCoverage * 100).toFixed(0)}% assessed`,
+            h.warnings.length ? `WARNING: ${h.warnings.join(" ")}` : null,
+          ].filter(Boolean).join(", ")
+        : h.failures.join(" "),
+      latencyMs: h.latencyMs,
+    };
+  }
+  return out;
+}
+
 async function checkCountyComps(): Promise<Check> {
   try {
     const h = await checkFairfaxHealth();
@@ -213,7 +260,10 @@ export async function GET() {
     checkTitleFlex(),
   ]);
 
+  const providerChecks = await checkAllProviders();
+
   const checks: Record<string, Check> = {
+    ...providerChecks,
     countyComps,
     valuationUpstream: valuation,
     titleflex,
@@ -224,8 +274,13 @@ export async function GET() {
   };
 
   // The tool is healthy when SOME route to a valuation works — not when every
-  // one does. County comps cover Fairfax; the upstream covers everywhere else.
-  const valuationSources = { countyComps, externalUpstream: valuation };
+  // one does. Each jurisdiction is listed separately, so a Maryland outage is
+  // visible even while DC and Fairfax keep answering; previously this reported
+  // a single "countyComps" derived from Fairfax alone.
+  const valuationSources: Record<string, Check> = {
+    ...providerChecks,
+    externalUpstream: valuation,
+  };
   const workingSources = Object.entries(valuationSources)
     .filter(([, c]) => c.status === "ok")
     .map(([name]) => name);

@@ -52,6 +52,32 @@ building characteristics. 59% of recent DC sales are marked unqualified —
 foreclosures, intra-family transfers, deeds in lieu. Elsewhere
 `assessmentRatioBand()` guesses at these from sale-to-assessment ratios.
 
+## Publishing lag — measured 2026-07-29
+
+How current each source is matters as much as how complete it is, and they
+differ enormously:
+
+| Source | Newest sale available | Lag |
+|---|---|---|
+| Washington, DC | 2026-07-20 | **10 days** |
+| Fairfax County | 2026-07-20 | **10 days** |
+| Maryland (SDAT) | 2026-04-30 | **90 days** |
+
+Maryland's is statewide, not local: querying the whole state returned **zero
+sales recorded in May, June or July**. That is SDAT's publishing cadence, not a
+fault and not something we can fix.
+
+It has two consequences worth stating plainly:
+
+1. **Maryland valuations are built on comps at least three months old.** The
+   engine time-adjusts them forward using locally-measured appreciation, so
+   this is compensated rather than ignored — but extrapolating a quarter ahead
+   adds error, and it is part of why Maryland trails DC and Fairfax.
+2. **The canary has to tolerate it.** `PROVIDER_PROBES` sets Maryland's
+   staleness threshold to 150 days rather than the 75-day default. At 75 it
+   would fail every single day and be ignored inside a week, which is worse
+   than having no canary. 150 still catches a genuine stall.
+
 ## Investigated and NOT viable on public data
 
 ### Arlington County, VA

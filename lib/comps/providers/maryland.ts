@@ -19,9 +19,19 @@ import { EsriFeature, esriQuery as sharedEsriQuery } from "./esri";
  * Fairfax publishes no building characteristics, so the engine substitutes
  * assessed value as a size-and-quality proxy. Maryland publishes living area,
  * lot acreage, year built and a structure grade, so the full appraisal-style
- * adjustment grid applies. Expect better accuracy here than the 5.2% median
- * error measured against Fairfax — particularly at the top of the market,
- * where the assessed-value proxy underestimates by around 10%.
+ * adjustment grid applies.
+ *
+ * That expectation did not survive measurement. Maryland runs at 8.7% median
+ * error against Fairfax's 5.3% and DC's 4.5%, despite the richer data — see
+ * docs/jurisdiction-data-sources.md, where an ablation shows the physical
+ * fields are worth tenths of a point while the assessment is worth 3.1pp.
+ *
+ * PUBLISHING LAG: measured 2026-07-29, the newest sale anywhere in Maryland
+ * was 2026-04-30, with none recorded for May, June or July — a ~90 day lag,
+ * against 10 days for DC and Fairfax. Comps here are always about a quarter
+ * stale. The engine time-adjusts them forward with locally-measured
+ * appreciation, so this is compensated rather than ignored, but extrapolating
+ * that far adds error and is part of why Maryland trails.
  */
 
 const BASE = "https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre";
