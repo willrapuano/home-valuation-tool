@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkFairfaxHealth } from "@/lib/comps/providers/fairfax";
+import { hasSharedCache } from "@/lib/kv";
 
 /**
  * Health check for uptime monitoring.
@@ -231,6 +232,10 @@ export async function GET() {
         ? `Valuations working via: ${workingSources.join(", ")}.`
         : "No valuations are being produced — every visitor is being routed to a manual CMA.",
       workingSources,
+      // Whether repeat lookups survive a lambda recycle. Without a shared
+      // store the cache still works, but only within one instance — see
+      // lib/kv.ts for why that measurably matters.
+      sharedCache: hasSharedCache(),
       failing: criticalFailures,
       checks,
       timestamp: new Date().toISOString(),
