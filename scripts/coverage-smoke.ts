@@ -9,6 +9,7 @@
 import { valueFromComps } from "../lib/comps";
 import { FairfaxCountyProvider } from "../lib/comps/providers/fairfax";
 import { MarylandProvider } from "../lib/comps/providers/maryland";
+import { DcProvider } from "../lib/comps/providers/dc";
 import { SubjectProperty } from "../lib/comps/types";
 
 const COVERAGE = [
@@ -16,6 +17,11 @@ const COVERAGE = [
     name: "fairfax",
     bbox: { minLat: 38.55, maxLat: 39.08, minLng: -77.56, maxLng: -77.0 },
     create: () => new FairfaxCountyProvider(),
+  },
+  {
+    name: "dc",
+    bbox: { minLat: 38.79, maxLat: 39.0, minLng: -77.13, maxLng: -76.89 },
+    create: () => new DcProvider(),
   },
   {
     name: "maryland",
@@ -45,17 +51,32 @@ const ADDRESSES = [
   { label: "Cumberland, MD", lat: 39.6529, lng: -78.7625, expect: "maryland", locate: true },
   { label: "Hagerstown, MD", lat: 39.6418, lng: -77.7199, expect: "maryland", locate: true },
   // Outside every covered source: these must return nothing rather than guess.
-  { label: "Washington, DC", lat: 38.9097, lng: -77.0353, expect: "none", locate: false },
+  { label: "Capitol Hill, DC", lat: 38.887, lng: -76.993, expect: "dc", locate: true },
+  { label: "Petworth, DC", lat: 38.942, lng: -77.023, expect: "dc", locate: true },
+  { label: "Anacostia, DC", lat: 38.8637, lng: -76.9836, expect: "dc", locate: true },
   { label: "Leesburg, VA", lat: 39.1157, lng: -77.5636, expect: "none", locate: false },
 ];
 
-/** Nearest recently-sold house to a point, so the test values a real home. */
-async function nearestHome(lat: number, lng: number): Promise<{ lat: number; lng: number } | null> {
-  const sales = await new MarylandProvider().fetchCandidates(
+/**
+ * Nearest recently-sold house to a point, so the test values a real home.
+ *
+ * Needed because a neighbourhood centroid lands on whatever happens to be
+ * there — a downtown office block in Bethesda, an apartment walk-up in
+ * Anacostia — and the engine rightly refuses to value those from house comps.
+ */
+async function nearestHome(
+  which: "maryland" | "dc",
+  lat: number,
+  lng: number
+): Promise<{ lat: number; lng: number } | null> {
+  const provider = which === "dc" ? new DcProvider() : new MarylandProvider();
+  const sales = await provider.fetchCandidates(
     { location: { lat, lng }, propertyType: "single_family" },
     { radiusMiles: 3, lookbackMonths: 24, limit: 400 }
   );
-  const houses = sales.filter(s => s.propertyType === "single_family" && s.sqft);
+  const houses = sales.filter(
+    s => (s.propertyType === "single_family" || s.propertyType === "townhouse") && s.sqft
+  );
   if (!houses.length) return null;
   let best = houses[0];
   let bestD = Infinity;
@@ -122,7 +143,7 @@ async function main() {
   for (const a of ADDRESSES) {
     let { lat, lng } = a;
     if (a.locate) {
-      const home = await nearestHome(lat, lng);
+      const home = await nearestHome(a.expect === "dc" ? "dc" : "maryland", lat, lng);
       if (home) ({ lat, lng } = home);
     }
     const t0 = Date.now();

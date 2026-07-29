@@ -58,7 +58,7 @@ const med = (xs: number[]) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
-function strip<T extends Record<string, unknown>>(o: T, drop: Field[]): T {
+function strip<T extends object>(o: T, drop: Field[]): T {
   const out = { ...o };
   for (const f of drop) delete (out as Record<string, unknown>)[f];
   return out;
@@ -92,7 +92,7 @@ async function main() {
       for (const ab of ABLATIONS) {
         // Strip from the comps as well: not having a field means not having it
         // anywhere, not just for the property being valued.
-        const comps = ab.drop.length ? cands.map(c => strip(c, ab.drop)) : cands;
+        const comps: ComparableSale[] = ab.drop.length ? cands.map(c => strip(c, ab.drop)) : cands;
         const subject = strip(
           {
             location: s.location,
