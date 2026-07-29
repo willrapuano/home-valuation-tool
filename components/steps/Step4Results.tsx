@@ -185,6 +185,9 @@ function FullResults({
           source: valuation.source,
           degraded: valuation.degraded,
           degradedReason: valuation.degradedReason,
+          // So the shared report shows the same sales as this screen. The
+          // route trims these to keep the link inside its length budget.
+          comps: valuation.comps,
         }),
       });
       const data = await res.json().catch(() => ({}));

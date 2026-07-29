@@ -117,3 +117,42 @@ describe("titleCase", () => {
     expect(titleCase("0402 03  0006")).toBe("0402 03 0006");
   });
 });
+
+describe("comps with no published address", () => {
+  const noAddress = (over: Partial<ScoredComp["comp"]> = {}) =>
+    scored({ comp: { ...scored().comp, address: "", ...over } });
+
+  it("never shows a parcel identifier as an address", () => {
+    // Fairfax's sales layer carries only a PIN. It was being stored in
+    // `address` and rendered verbatim, so Fairfax homeowners — the largest
+    // group of them — saw six rows reading "0311 17 0027".
+    const [c] = toPublicComps([noAddress()]);
+    expect(c.address).toBe("Nearby home");
+  });
+
+  it("uses a resolved address when the provider supplies one", () => {
+    const [c] = toPublicComps(
+      [noAddress()],
+      new Map([["0402@2026-03-15", "1205 SUFFIELD DR"]])
+    );
+    expect(c.address).toBe("1205 Suffield Dr");
+  });
+
+  it("falls back per comp, not for the whole set", () => {
+    // The resolver verifies each match against the parcel identifier, so a
+    // partial result is the normal case rather than an error.
+    const comps = toPublicComps(
+      [noAddress({ id: "a" }), noAddress({ id: "b" })],
+      new Map([["a", "1205 SUFFIELD DR"]])
+    );
+    expect(comps.map(c => c.address)).toEqual(["1205 Suffield Dr", "Nearby home"]);
+  });
+
+  it("prefers a resolved address over one already on the comp", () => {
+    const [c] = toPublicComps(
+      [scored()],
+      new Map([["0402@2026-03-15", "1205 SUFFIELD DR"]])
+    );
+    expect(c.address).toBe("1205 Suffield Dr");
+  });
+});

@@ -110,4 +110,21 @@ export interface CompsProvider {
     subject: SubjectProperty,
     opts: { radiusMiles: number; lookbackMonths: number; limit?: number }
   ): Promise<ComparableSale[]>;
+  /**
+   * Street addresses for the handful of comps that will actually be shown.
+   *
+   * Optional, and only implemented where the sales feed itself carries no
+   * situs address — Fairfax's does not, so its comps arrive with `address`
+   * empty and are resolved here instead.
+   *
+   * Called with the final six comps rather than the several hundred
+   * candidates, because it costs a network round trip per property and only
+   * the published ones are ever read by a human.
+   *
+   * Returns id → address. An id may be absent: a resolver that is not certain
+   * which property it matched must omit it rather than guess, since a comp
+   * labelled with the neighbour's address is worse than one labelled
+   * "Nearby home".
+   */
+  resolveAddresses?(comps: ComparableSale[]): Promise<Map<string, string>>;
 }

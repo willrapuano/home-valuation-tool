@@ -302,6 +302,16 @@ async function attempt(
 
     const maxDistance = result.comps.reduce((m, c) => Math.max(m, c.distanceMiles), 0);
 
+    // Label the comps that will be shown. Only Fairfax needs this — its sales
+    // layer publishes no situs address — and it runs on the six surviving
+    // comps, not the candidate pool. A failure here costs labels, never the
+    // estimate, which is already computed above.
+    const addresses = provider.resolveAddresses
+      ? await provider
+          .resolveAddresses(result.comps.map(c => c.comp))
+          .catch(() => new Map<string, string>())
+      : undefined;
+
     return {
       estimate: Math.round(result.estimate),
       low: result.low!,
@@ -315,7 +325,7 @@ async function attempt(
       source: coverage.name,
       // The sales the number is actually built from. Previously computed and
       // then discarded — see lib/comps/present.ts.
-      comps: toPublicComps(result.comps),
+      comps: toPublicComps(result.comps, addresses),
     };
   } catch (err) {
     // One dead source must not take down coverage for a region another

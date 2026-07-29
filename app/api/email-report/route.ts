@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { encodeReportUrl, ReportAddress, ReportComp } from "@/lib/report-payload";
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_BASE_URL ||
   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://home-valuation-tool.vercel.app");
 
 function buildReportUrl(body: {
-  address: { full: string; streetNumber: string; streetName: string; city: string; state: string; zipCode: string };
+  address: ReportAddress;
   estimate?: number;
   low?: number;
   high?: number;
@@ -22,8 +23,9 @@ function buildReportUrl(body: {
   source?: string;
   degraded?: boolean;
   degradedReason?: string;
+  comps?: ReportComp[];
 }): string {
-  const reportData = {
+  return encodeReportUrl(BASE_URL, {
     address: body.address,
     valuation: {
       estimate: body.estimate,
@@ -44,10 +46,11 @@ function buildReportUrl(body: {
       homeType: body.homeType,
       fmr: body.fmr,
       areaMedianIncome: body.areaMedianIncome,
+      // The sales behind the number. Shown on the results screen since #8; the
+      // shareable report was still saying "based on 6 sales" without naming one.
+      comps: Array.isArray(body.comps) ? body.comps : undefined,
     },
-  };
-  const encoded = encodeURIComponent(Buffer.from(JSON.stringify(reportData)).toString("base64"));
-  return `${BASE_URL}/report?d=${encoded}`;
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -71,6 +74,7 @@ export async function POST(req: NextRequest) {
     source,
     degraded,
     degradedReason,
+    comps,
   } = body;
 
   if (!email) return NextResponse.json({ error: "Email required" }, { status: 400 });
@@ -103,6 +107,7 @@ export async function POST(req: NextRequest) {
     source,
     degraded,
     degradedReason,
+    comps,
   });
 
   const apiKey = process.env.GHL_API_KEY;
