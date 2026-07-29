@@ -58,9 +58,8 @@ disappears because there is no upstream in the request path.
   you can trivially with a local table.
 - **No third-party outage in the funnel.** A failed ingest means yesterday's
   data, not a blank screen. The system degrades instead of breaking.
-- **Somewhere to put non-API sources.** The Arlington and Loudoun records
-  requests (`records-request-*.md`) return spreadsheets, not endpoints. They
-  need a table to land in. Same for any commercial extract.
+- **Somewhere to put non-API sources.** A commercial extract is a file, not an
+  endpoint, and needs a table to land in.
 - **Backtesting gets cheap.** Every backtest in `scripts/` currently re-fetches
   thousands of records from public services; several of the slow, flaky runs in
   this project's history were self-inflicted rate limiting.
@@ -98,7 +97,7 @@ the same holdout method before it serves anyone.
 
 | | |
 |---|---|
-| Schema + indexes | **done** — `db/schema.sql` |
+| Schema + indexes | **done** — `db/schema.sql`, applied automatically by `scripts/ingest.ts` |
 | Pooled client, optional by design | **done** — `lib/db.ts` |
 | `PostgresProvider` | **done** — `lib/comps/providers/postgres.ts` |
 | Tiled, idempotent, resumable ingest | **done** — `scripts/ingest.ts` |
@@ -118,21 +117,20 @@ dependency.
 #    Copy the POOLED connection string.
 export DATABASE_URL='postgres://...-pooler...'
 
-# 2. Apply the schema.
-psql "$DATABASE_URL" -f db/schema.sql
-
-# 3. Ingest. Start with one jurisdiction; Maryland is statewide and long.
+# 2. Ingest. It applies db/schema.sql itself if the tables are missing, so
+#    there is no separate migration step to forget. Start with one
+#    jurisdiction; Maryland is statewide and long.
 npx tsx scripts/ingest.ts dc
 npx tsx scripts/ingest.ts fairfax
 npx tsx scripts/ingest.ts maryland
 
-# 4. VALIDATE BEFORE TRUSTING IT. These must match the live-source numbers
+# 3. VALIDATE BEFORE TRUSTING IT. These must match the live-source numbers
 #    (DC 4.5%, Fairfax 5.3%, Maryland 8.7%).
 npx tsx scripts/dc-backtest.ts 40
 npx tsx scripts/backtest.ts 40
 npx tsx scripts/maryland-backtest.ts 50
 
-# 5. Set DATABASE_URL in Vercel, redeploy, then re-measure.
+# 4. Set DATABASE_URL in Vercel, redeploy, then re-measure.
 npx tsx scripts/latency-probe.ts
 ```
 
