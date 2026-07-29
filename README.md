@@ -117,16 +117,25 @@ from its own comp set.
 
 | Source | Coverage | Holdout MdAPE | n |
 |---|---|---|---|
-| Washington, DC | citywide | **4.3%** | 219 |
-| Fairfax County | 1 county | **4.7%** | 160 |
-| Maryland (SDAT) | all 24 jurisdictions | **7.8%** | 255 |
+| Washington, DC | citywide | **4.5%** | 232 |
+| Fairfax County | 1 county | **5.3%** | 239 |
+| Maryland (SDAT) | all 24 jurisdictions | **8.7%** | 268 |
 
 DC is the most accurate because it is the only source that states whether a
 sale was arm's-length instead of leaving it to be inferred. Filtering to
-qualified sales alone is worth **1.9 percentage points** (6.2% → 4.3%) — a
+qualified sales alone is worth roughly **2 percentage points** — a
 larger effect than any physical characteristic. 59% of recent DC sales are
 marked unqualified: foreclosures, transfers between relatives, deeds in lieu.
 Where that flag does not exist, `assessmentRatioBand()` approximates it.
+
+These figures were re-measured after fixing a truncation bug in the providers
+(see `orderByFields` in each). Before that fix the sales queries returned an
+arbitrary subset when more records matched than were requested, and the subset
+dropped the NEWEST sales — so the earlier published figures (DC 4.3%, Fairfax
+4.7%, Maryland 7.8%) were measured against a test set that was both smaller and
+biased toward properties the truncation happened to spare. Fairfax went from
+160 to 239 predictions. The numbers above are higher and trustworthy; the
+earlier ones were lower and were not.
 
 MdAPE is median absolute percent error. Zillow publishes ~2-3% for on-market
 homes and ~7% off-market; every property here is off-market by construction.

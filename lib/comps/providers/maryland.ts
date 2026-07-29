@@ -187,6 +187,7 @@ export class MarylandProvider implements CompsProvider {
     const since = new Date();
     since.setMonth(since.getMonth() - opts.lookbackMonths);
 
+    const limit = Math.min(opts.limit ?? 200, MAX_RECORDS);
     const residential = Object.keys(LAND_USE).map(c => `'${c}'`).join(",");
     const where = [
       `CONSIDR1 > ${minPrice}`,
@@ -210,10 +211,21 @@ export class MarylandProvider implements CompsProvider {
       outFields:
         "ACCTID,ADDRESS,TRADATE,CONSIDR1,CURTTLVL,SQFTSTRC,YEARBLT,ACRES,SUBDIVSN,STRUGRAD,LU,ZIPCODE",
       returnGeometry: "true",
-      resultRecordCount: String(Math.min(opts.limit ?? 200, MAX_RECORDS)),
+      resultRecordCount: String(limit),
+      // Truncation must cost us the OLDEST sales, not the newest. Without an
+      // explicit order the service returns an arbitrary subset when more
+      // records match than were requested, and in Fairfax that was measured
+      // dropping every sale from the most recent seven months.
+      orderByFields: "TRADATE DESC",
     });
 
     assertFields(features, SALES_FIELDS, "MD_PropertySales");
+    if (features.length >= limit) {
+      console.warn(
+        `[maryland] sales query returned the full ${limit} requested at ` +
+          `${opts.radiusMiles}mi — comps are the most recent ${limit}, but the pool is capped.`
+      );
+    }
 
     // One comp per account, keeping the most recent sale — public record
     // carries re-recorded deeds, the same defect seen in Fairfax.

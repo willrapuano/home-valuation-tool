@@ -26,9 +26,9 @@ integrate it.
 
 | Jurisdiction | Sale price | Assessed value | Characteristics | Arm's-length | MdAPE |
 |---|---|---|---|---|---|
-| Washington, DC | yes | yes | beds, baths, GBA, condition, year | **yes** | **4.3%** |
-| Fairfax County, VA | yes | yes | none | inferred | **4.7%** |
-| Maryland (all 24) | yes | yes | sqft, lot, year, grade | inferred | **7.8%** |
+| Washington, DC | yes | yes | beds, baths, GBA, condition, year | **yes** | **4.5%** |
+| Fairfax County, VA | yes | yes | none | inferred | **5.3%** |
+| Maryland (all 24) | yes | yes | sqft, lot, year, grade | inferred | **8.7%** |
 
 The assessment-ratio band is set per source, not globally, because the right
 setting depends on whether the source publishes an arm's-length flag. Measured

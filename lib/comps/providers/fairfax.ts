@@ -115,6 +115,24 @@ async function esriQuery(
   });
 }
 
+/**
+ * Say so when a result set came back exactly full.
+ *
+ * A capped response is indistinguishable from a complete one except by count,
+ * and treating it as complete means valuing a home from a truncated slice of
+ * its market. Ordering by date makes truncation survivable; this makes it
+ * visible.
+ */
+function warnIfTruncated(returned: number, requested: number, label: string, radiusMiles: number): void {
+  if (requested > 0 && returned >= requested) {
+    console.warn(
+      `[${label.toLowerCase()}] sales query returned the full ${requested} requested at ` +
+        `${radiusMiles}mi — more sales matched than were fetched. Comps are the most ` +
+        `recent ${requested}, which is correct, but the pool is capped.`
+    );
+  }
+}
+
 /** Area-weighted centroid of a polygon's outer ring. */
 export function ringCentroid(rings?: number[][][]): LatLng | null {
   const ring = rings?.[0];
@@ -195,14 +213,30 @@ export class FairfaxCountyProvider implements CompsProvider {
       resultRecordCount: String(Math.min(opts.limit ?? 200, MAX_RECORDS)),
     };
 
+    const requested = Number(spatial.resultRecordCount);
     const sales = await esriQuery(SALES_LAYER, {
       ...spatial,
       where,
       outFields: "PIN,SALEDT,PRICE,SALEVAL_DESC,SALETYPE_DESC,NOPAR",
       returnGeometry: "true",
+      // WITHOUT THIS, TRUNCATION SILENTLY DESTROYS RECENCY.
+      //
+      // When more sales match than we ask for, the service returns an
+      // arbitrary subset — in practice ordered by OBJECTID, so the newest
+      // sales are the ones dropped. Measured near Springfield: a 3-mile query
+      // returned 1,299 sales whose newest was 2025-12-30, while a 2.5-mile
+      // query over a SMALLER area returned 227 sales from 2026. Every recent
+      // sale had vanished from the larger result set.
+      //
+      // Comps that are quietly all stale are worse than no comps: the engine
+      // time-adjusts them forward and reports high confidence while doing it.
+      // Ordering by sale date means that if anything is lost, it is the oldest
+      // and least useful.
+      orderByFields: "SALEDT DESC",
     });
 
     assertFields(sales, SALES_FIELDS, "ParcelPlusSales");
+    warnIfTruncated(sales.length, requested, "Fairfax", opts.radiusMiles);
 
     if (!sales.length) return [];
 
