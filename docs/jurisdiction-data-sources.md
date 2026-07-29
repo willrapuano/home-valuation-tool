@@ -78,7 +78,17 @@ acquisition problem. The options, in order of cost:
 
 1. **Records request / bulk extract** from each county assessor. Often free or
    near-free, and produces exactly the two fields that matter. Slow to arrange,
-   and needs a refresh cadence.
+   and needs a refresh cadence. **Drafted and ready to send:**
+   `records-request-arlington.md`, `records-request-loudoun.md`.
+
+   Both ask for the parcel identifier first, because we already hold the
+   geometry for both counties — only the attributes are missing, and they join
+   on a key the counties already publish. Both also ask for the assessor's
+   arm's-length/validity code, which DC showed is worth 1.9pp.
+
+   Each letter opens with a phone call rather than a filing: localities often
+   sell a standing assessment extract outside FOIA, which is faster, cheaper,
+   and comes with a refresh schedule.
 2. **Commercial property data** (TitlePro247, TitleFlex, or an MLS feed).
    Worth noting where the value actually is: not accuracy in the jurisdictions
    already covered, where public assessments are already doing the work, but
