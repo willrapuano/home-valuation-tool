@@ -95,7 +95,7 @@ It also catches the two failures that produce *no error at all*:
 daily so a break surfaces there rather than in a homeowner's browser.
 
 ```bash
-npx tsx scripts/fairfax-canary.ts   # exits non-zero when the source is broken
+npx tsx scripts/data-source-canary.ts   # exits non-zero when the source is broken
 ```
 
 `/api/health` returns 200 when *any* valuation route works and 503 when none
