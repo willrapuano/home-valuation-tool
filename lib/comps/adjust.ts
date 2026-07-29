@@ -13,6 +13,10 @@ import { ComparableSale, SubjectProperty } from "./types";
  * value regardless of how physically similar the house is.
  */
 
+function clamp01(n: number): number {
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1;
+}
+
 export interface AdjustmentResult {
   adjustedPrice: number;
   adjustments: Record<string, number>;
@@ -34,35 +38,58 @@ export function adjustComp(
     adjustments.time = comp.soldPrice * factor;
   }
 
-  // An assessment already prices size, quality, condition and lot together,
-  // so when one is available for both properties it REPLACES the physical
-  // grid rather than adding to it. Applying both would double-count the same
-  // differences — a bigger house would be adjusted for its extra square
-  // footage once via GLA and again via the higher assessment it produces.
-  const useAssessment = Boolean(subject.assessedValue && comp.assessedValue);
+  // Two ways to say how the subject differs from the comp, and they overlap
+  // almost entirely: an assessment already prices size, quality, condition and
+  // lot together. Summing both would double-count every difference — a bigger
+  // house adjusted once for its extra square footage and again for the higher
+  // assessment that square footage produced.
+  //
+  // So they are alternatives, blended rather than summed. The weight is how
+  // much the local assessor is worth listening to, measured from the spread of
+  // sale-to-assessment ratios nearby; see calibrate.ts. Where the assessment
+  // is fresh it does the whole job, where it is stale the grid takes over, and
+  // in between the estimate leans on both.
+  const assessedAvailable = Boolean(subject.assessedValue && comp.assessedValue);
 
-  if (useAssessment) {
+  const physical: Record<string, number> = {};
+  if (subject.sqft && comp.sqft) {
+    physical.gla = (subject.sqft - comp.sqft) * market.pricePerSqft;
+  }
+  if (subject.lotSqft && comp.lotSqft) {
+    physical.lot = (subject.lotSqft - comp.lotSqft) * market.pricePerLotSqft;
+  }
+  if (subject.baths && comp.baths) {
+    physical.baths = (subject.baths - comp.baths) * market.bathValue;
+  }
+  if (subject.beds && comp.beds) {
+    physical.beds = (subject.beds - comp.beds) * market.bedValue;
+  }
+  if (subject.yearBuilt && comp.yearBuilt) {
+    // Newer subject than comp => positive adjustment.
+    physical.age = (subject.yearBuilt - comp.yearBuilt) * market.perYearOfAge;
+  }
+  if (subject.condition && comp.condition) {
+    physical.condition = (subject.condition - comp.condition) * market.perConditionPoint;
+  }
+
+  // Living area is what carries the physical grid; without it the remaining
+  // terms describe a house too vaguely to stand as an alternative basis, and
+  // blending toward them would just dilute a good assessment toward zero.
+  const physicalAvailable = "gla" in physical;
+
+  // Only blend where both bases genuinely exist. Falling back to a weighted
+  // average against a missing basis would silently shrink every adjustment
+  // toward no adjustment at all, which reads as confidence rather than as the
+  // absence of data it really is.
+  const w = assessedAvailable && physicalAvailable ? clamp01(market.assessmentWeight) : assessedAvailable ? 1 : 0;
+
+  if (w > 0) {
     adjustments.assessed =
-      (subject.assessedValue! - comp.assessedValue!) * market.saleToAssessedRatio;
-  } else {
-    if (subject.sqft && comp.sqft) {
-      adjustments.gla = (subject.sqft - comp.sqft) * market.pricePerSqft;
-    }
-    if (subject.lotSqft && comp.lotSqft) {
-      adjustments.lot = (subject.lotSqft - comp.lotSqft) * market.pricePerLotSqft;
-    }
-    if (subject.baths && comp.baths) {
-      adjustments.baths = (subject.baths - comp.baths) * market.bathValue;
-    }
-    if (subject.beds && comp.beds) {
-      adjustments.beds = (subject.beds - comp.beds) * market.bedValue;
-    }
-    if (subject.yearBuilt && comp.yearBuilt) {
-      // Newer subject than comp => positive adjustment.
-      adjustments.age = (subject.yearBuilt - comp.yearBuilt) * market.perYearOfAge;
-    }
-    if (subject.condition && comp.condition) {
-      adjustments.condition = (subject.condition - comp.condition) * market.perConditionPoint;
+      (subject.assessedValue! - comp.assessedValue!) * market.saleToAssessedRatio * w;
+  }
+  if (w < 1) {
+    for (const [k, v] of Object.entries(physical)) {
+      adjustments[k] = v * (1 - w);
     }
   }
 

@@ -32,7 +32,9 @@ A multi-step home valuation lead capture tool built for Candee Currie (TTR Sothe
 | Layer | Source | Required key | If missing |
 |---|---|---|---|
 | Address autocomplete | Nominatim (OpenStreetMap) | none | — |
-| Property valuation (Fairfax) | County records + our comps engine | none | Falls through to the upstream below |
+| Property valuation (Fairfax County, VA) | County records + our comps engine | none | Falls through to DC/Maryland, then the upstream |
+| Property valuation (Washington, DC) | DC DCGIS parcels + CAMA + our comps engine | none | Falls through to the upstream below |
+| Property valuation (all 24 Maryland jurisdictions) | Maryland iMAP / SDAT + our comps engine | none | Falls through to the upstream below |
 | Property valuation (elsewhere) | `VALUATION_API_URL` upstream | `VALUATION_API_KEY` | No estimate returned; UI routes to a manual CMA |
 | Median household income | Census ACS 5-year | `CENSUS_API_KEY` | Field hidden |
 | Fair Market Rents | HUD FMR API | `HUD_API_TOKEN` | Rental section hidden entirely |
@@ -97,7 +99,68 @@ npx tsx scripts/fairfax-canary.ts   # exits non-zero when the source is broken
 ```
 
 `/api/health` returns 200 when *any* valuation route works and 503 when none
-do — county comps cover Fairfax, the external upstream covers everywhere else.
+do — public records cover Fairfax County and all of Maryland, the external
+upstream covers everywhere else.
+
+## Coverage and measured accuracy
+
+Public-records providers are declared in `COVERAGE` in `app/api/avm/route.ts`
+with a bounding box each. The boxes deliberately overlap — Bethesda sits inside
+the Fairfax box despite being in Maryland — so coverage is decided by running
+every covering source **concurrently** and taking the first that actually
+produces a valuation. Each provider's spatial query is authoritative; the boxes
+only avoid pointless round trips.
+
+Accuracy is measured by holdout backtest: each property is valued as of the day
+before it sold, from sales that had already closed, with the property excluded
+from its own comp set.
+
+| Source | Coverage | Holdout MdAPE | n |
+|---|---|---|---|
+| Washington, DC | citywide | **4.3%** | 219 |
+| Fairfax County | 1 county | **4.7%** | 160 |
+| Maryland (SDAT) | all 24 jurisdictions | **8.0%** | 256 |
+
+DC is the most accurate because it is the only source that states whether a
+sale was arm's-length instead of leaving it to be inferred. Filtering to
+qualified sales alone is worth **1.9 percentage points** (6.2% → 4.3%) — a
+larger effect than any physical characteristic. 59% of recent DC sales are
+marked unqualified: foreclosures, transfers between relatives, deeds in lieu.
+Where that flag does not exist, `assessmentRatioBand()` approximates it.
+
+MdAPE is median absolute percent error. Zillow publishes ~2-3% for on-market
+homes and ~7% off-market; every property here is off-market by construction.
+Confidence tracks accuracy in both markets (Maryland: 5.5% high / 11.9% medium
+/ 13.6% low), so the label on the screen means something.
+
+```bash
+npx tsx scripts/backtest.ts 40           # Fairfax
+npx tsx scripts/maryland-backtest.ts 50  # Maryland
+npx tsx scripts/dc-backtest.ts 40        # DC, incl. the arm's-length comparison
+npx tsx scripts/field-ablation.ts 40     # what each data field is worth
+npx tsx scripts/coverage-smoke.ts        # cross-jurisdiction routing
+```
+
+### Market constants are measured, not configured
+
+The adjustment grid needs to know what a square foot is worth. Hardcoding it is
+why the engine only worked in one county: $250/sqft is about right for Northern
+Virginia, and 60% too low for Bethesda, where the measured figure is $634.
+
+`lib/comps/calibrate.ts` derives the constants from the same local sales it is
+about to reconcile — price per square foot, per square foot of lot, per year of
+age, appreciation, and the sale-to-assessment ratio — so pointing the engine at
+a new county calibrates it to that county on the first request, with no
+per-jurisdiction tuning step. Every coefficient is clamped to a plausible range
+and falls back to the prior when the local sample is too thin, because an
+unconstrained fit on 40 noisy records produces negative dollars per square foot
+often enough to matter.
+
+Adding a jurisdiction is a provider plus a bounding box, not a calibration
+exercise — *provided the jurisdiction publishes sale prices and assessed
+values*. Many do not. See `docs/jurisdiction-data-sources.md` for what each one
+actually publishes, including why Arlington and Loudoun cannot be added on
+public data alone.
 
 ### Known limitation: the upstream is the weak link
 
