@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * mapped into, and the query semantics that decide which sales are eligible.
  *
  * The real validation is the backtest against ingested data, which must match
- * the live-source numbers (DC 4.3%, Fairfax 4.7%, Maryland 8.0%) before this
+ * the live-source numbers (DC 4.5%, Fairfax 5.3%, Maryland 8.7%) before this
  * provider serves anyone.
  */
 

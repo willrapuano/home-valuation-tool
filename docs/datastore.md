@@ -127,7 +127,7 @@ npx tsx scripts/ingest.ts fairfax
 npx tsx scripts/ingest.ts maryland
 
 # 4. VALIDATE BEFORE TRUSTING IT. These must match the live-source numbers
-#    (DC 4.3%, Fairfax 4.7%, Maryland 8.0%).
+#    (DC 4.5%, Fairfax 5.3%, Maryland 8.7%).
 npx tsx scripts/dc-backtest.ts 40
 npx tsx scripts/backtest.ts 40
 npx tsx scripts/maryland-backtest.ts 50

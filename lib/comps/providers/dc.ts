@@ -248,6 +248,7 @@ export class DcProvider implements CompsProvider {
 
     const since = new Date();
     since.setMonth(since.getMonth() - opts.lookbackMonths);
+    const limit = Math.min(opts.limit ?? 200, MAX_RECORDS);
 
     const features = await esriQuery(OWNER_LAYER, {
       geometry: JSON.stringify({
@@ -264,10 +265,19 @@ export class DcProvider implements CompsProvider {
       where: `SALEPRICE > ${minPrice} AND SALEDATE > ${toDcTimestamp(since)}`,
       outFields: "SSL,PREMISEADD,SALEPRICE,SALEDATE,NEWTOTAL,OLDTOTAL,LANDAREA,NBHDNAME,PROPTYPE",
       returnGeometry: "true",
-      resultRecordCount: String(Math.min(opts.limit ?? 200, MAX_RECORDS)),
+      resultRecordCount: String(limit),
+      // See the Fairfax provider: without an explicit order, a capped result
+      // set silently loses the newest sales rather than the oldest.
+      orderByFields: "SALEDATE DESC",
     });
 
     assertFields(features, SALES_FIELDS, "Owner Polygons");
+    if (features.length >= limit) {
+      console.warn(
+        `[dc] sales query returned the full ${limit} requested at ` +
+          `${opts.radiusMiles}mi — comps are the most recent ${limit}, but the pool is capped.`
+      );
+    }
 
     // One comp per parcel, keeping the most recent sale. Public record carries
     // re-recorded deeds; both Fairfax and Maryland showed the same defect.
