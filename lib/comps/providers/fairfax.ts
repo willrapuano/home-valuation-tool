@@ -1,4 +1,5 @@
 import { ComparableSale, CompsProvider, LatLng, PropertyType, SubjectProperty } from "../types";
+import { EsriFeature, esriQuery as sharedEsriQuery } from "./esri";
 
 /**
  * Fairfax County, VA comparable sales provider.
@@ -28,6 +29,8 @@ const ASSESSED_LAYER = `${BASE}/ParcelPlusAssessedValues/MapServer/0/query`;
 // Kept well under the API route's own budget: the county service is
 // occasionally slow, and a long hang here burns the whole request.
 const TIMEOUT_MS = 7_000;
+/** Fire a second attempt once the first has stalled this long. */
+const HEDGE_AFTER_MS = 2_500;
 /** The service caps a single response at 2000 features. */
 const MAX_RECORDS = 2000;
 
@@ -60,11 +63,6 @@ export interface FairfaxOptions {
   excludeMultiParcel?: boolean;
   /** Floor for sale price, to drop nominal conveyances. */
   minPrice?: number;
-}
-
-interface EsriFeature {
-  attributes: Record<string, unknown>;
-  geometry?: { rings?: number[][][] };
 }
 
 /**
@@ -108,38 +106,13 @@ async function esriQuery(
   url: string,
   params: Record<string, string>
 ): Promise<EsriFeature[]> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ f: "json", ...params }).toString(),
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`Fairfax GIS returned HTTP ${res.status}`);
-
-    // A too-long or malformed request comes back as an HTML error page.
-    const text = await res.text();
-    let data: { error?: { message?: string }; features?: EsriFeature[] };
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error("Fairfax GIS returned a non-JSON response");
-    }
-
-    if (data?.error) {
-      throw new Error(`Fairfax GIS error: ${data.error.message ?? "unknown"}`);
-    }
-    return data?.features ?? [];
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") {
-      throw new Error(`Fairfax GIS request timed out after ${TIMEOUT_MS}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
+  return sharedEsriQuery({
+    url,
+    params,
+    timeoutMs: TIMEOUT_MS,
+    hedgeAfterMs: HEDGE_AFTER_MS,
+    label: "Fairfax GIS",
+  });
 }
 
 /** Area-weighted centroid of a polygon's outer ring. */

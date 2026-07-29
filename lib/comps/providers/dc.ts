@@ -1,4 +1,5 @@
 import { ComparableSale, CompsProvider, Condition, LatLng, PropertyType, SubjectProperty } from "../types";
+import { EsriFeature, esriQuery as sharedEsriQuery } from "./esri";
 
 /**
  * District of Columbia comparable sales provider.
@@ -25,7 +26,8 @@ const OWNER_LAYER = `${BASE}/40/query`;
 const CAMA_RESIDENTIAL = `${BASE}/25/query`;
 
 const TIMEOUT_MS = 8_000;
-const RETRY_DELAY_MS = 400;
+/** Fire a second attempt once the first has stalled this long. */
+const HEDGE_AFTER_MS = 2_500;
 const MAX_RECORDS = 2000;
 /** Widest search for the subject parcel, in miles. */
 const SUBJECT_SEARCH_MILES = 0.1;
@@ -49,11 +51,6 @@ export class DcSchemaError extends Error {
   }
 }
 
-interface EsriFeature {
-  attributes: Record<string, unknown>;
-  geometry?: { x?: number; y?: number; rings?: number[][][] };
-}
-
 function assertFields(features: EsriFeature[], required: string[], layer: string): void {
   if (!features.length) return;
   const sample = features[0].attributes ?? {};
@@ -61,51 +58,18 @@ function assertFields(features: EsriFeature[], required: string[], layer: string
   if (missing.length) throw new DcSchemaError(layer, missing, Object.keys(sample));
 }
 
-async function esriQueryOnce(url: string, params: Record<string, string>): Promise<EsriFeature[]> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ f: "json", ...params }).toString(),
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`DC DCGIS returned HTTP ${res.status}`);
-
-    const text = await res.text();
-    let data: { error?: { message?: string }; features?: EsriFeature[] };
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error("DC DCGIS returned a non-JSON response");
-    }
-    if (data?.error) {
-      // A malformed query is our bug and fails identically on retry.
-      const err = new Error(`DC DCGIS error: ${data.error.message ?? "unknown"}`);
-      (err as Error & { permanent?: boolean }).permanent = true;
-      throw err;
-    }
-    return data?.features ?? [];
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") {
-      throw new Error(`DC DCGIS request timed out after ${TIMEOUT_MS}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** One retry on transient failure; see the Maryland provider for why. */
+/**
+ * Query the DC service, hedging a second attempt when the first stalls.
+ * See esri.ts; measured p90 here was 14.56s before hedging.
+ */
 async function esriQuery(url: string, params: Record<string, string>): Promise<EsriFeature[]> {
-  try {
-    return await esriQueryOnce(url, params);
-  } catch (err) {
-    if ((err as Error & { permanent?: boolean })?.permanent) throw err;
-    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-    return esriQueryOnce(url, params);
-  }
+  return sharedEsriQuery({
+    url,
+    params,
+    timeoutMs: TIMEOUT_MS,
+    hedgeAfterMs: HEDGE_AFTER_MS,
+    label: "DC DCGIS",
+  });
 }
 
 /**
