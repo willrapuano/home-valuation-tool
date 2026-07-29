@@ -94,17 +94,54 @@ jurisdiction, and the query side is a new `CompsProvider` reading from Postgres.
 which also means the existing backtests can validate the ingested data against
 the same holdout method before it serves anyone.
 
-### Order of work
+### Status — code is written, database is not provisioned
 
-1. Postgres + PostGIS, schema above, migration.
-2. Ingest job per jurisdiction, tiled, idempotent, resumable. Log what it wrote.
-3. `PostgresProvider` implementing `CompsProvider`.
-4. Backtest against it. It must match the live-source numbers (DC 4.3%,
-   Fairfax 4.7%, Maryland 8.0%) before it goes in front of anyone.
-5. Put it first in `COVERAGE`, keeping the live providers as fallback for
-   anything not yet ingested.
-6. Re-measure with `scripts/latency-probe.ts`.
-7. Only then: monthly re-valuation, which is now a cron over the table.
+| | |
+|---|---|
+| Schema + indexes | **done** — `db/schema.sql` |
+| Pooled client, optional by design | **done** — `lib/db.ts` |
+| `PostgresProvider` | **done** — `lib/comps/providers/postgres.ts` |
+| Tiled, idempotent, resumable ingest | **done** — `scripts/ingest.ts` |
+| Wired into `COVERAGE`, first, behind `hasDatabase()` | **done** |
+| Freshness in `/api/health` | **done** |
+| **Provision the database** | **needs a human** |
+| **Backtest the ingested data** | blocked on the above |
 
-Step 4 is not optional. An ingest bug that drops a third of the sales would
-still produce confident-looking valuations.
+With no `DATABASE_URL` the provider is skipped entirely and the tool behaves
+exactly as it does today — the database is an accelerator, not a new hard
+dependency.
+
+### To turn it on
+
+```bash
+# 1. Create a Postgres with PostGIS (Vercel Storage, Neon, Supabase).
+#    Copy the POOLED connection string.
+export DATABASE_URL='postgres://...-pooler...'
+
+# 2. Apply the schema.
+psql "$DATABASE_URL" -f db/schema.sql
+
+# 3. Ingest. Start with one jurisdiction; Maryland is statewide and long.
+npx tsx scripts/ingest.ts dc
+npx tsx scripts/ingest.ts fairfax
+npx tsx scripts/ingest.ts maryland
+
+# 4. VALIDATE BEFORE TRUSTING IT. These must match the live-source numbers
+#    (DC 4.3%, Fairfax 4.7%, Maryland 8.0%).
+npx tsx scripts/dc-backtest.ts 40
+npx tsx scripts/backtest.ts 40
+npx tsx scripts/maryland-backtest.ts 50
+
+# 5. Set DATABASE_URL in Vercel, redeploy, then re-measure.
+npx tsx scripts/latency-probe.ts
+```
+
+Step 4 is not optional. An ingest bug that drops a third of the sales still
+produces confident-looking valuations — the numbers just quietly get worse.
+
+### Then: monthly re-valuation
+
+Once the table exists this is a cron over it rather than a rebuild: iterate
+captured leads, re-run `valueFromComps` against current rows, and email the
+delta. That is the Homebot retention loop, and it is the reason to do this
+beyond latency.
