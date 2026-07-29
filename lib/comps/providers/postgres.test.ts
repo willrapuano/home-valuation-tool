@@ -123,7 +123,9 @@ describe("PostgresProvider.fetchCandidates", () => {
       { location: { lat: 38.9, lng: -77.1 }, propertyType: "single_family" },
       { radiusMiles: 1, lookbackMonths: 12, limit: 999_999 }
     );
-    expect(captured[0].params[4]).toBe(2000);
+    // By value, not by position: a new predicate shifts every index after it,
+    // and this assertion has already been broken once that way.
+    expect(captured[0].params).toContain(2000);
   });
 });
 
@@ -144,5 +146,54 @@ describe("PostgresProvider.lookupSubject", () => {
     const s = await new PostgresProvider().lookupSubject({ lat: 38.9, lng: -77.1 });
     expect(s?.assessedValue).toBe(820_000);
     expect(s?.lastSalePrice).toBe(850_000);
+  });
+});
+
+describe("jurisdiction allow-list", () => {
+  /**
+   * `sales` is a shared bucket. `scripts/ingest.ts` fills it from the same
+   * county public records the live providers use, but
+   * `scripts/ingest-titlepro.ts` fills it from TitlePro247 farm-list exports —
+   * licensed third-party data whose redistribution to anonymous consumers is
+   * not established.
+   *
+   * The query originally had no jurisdiction predicate, so ingesting that data
+   * would have published it on the next request, with no code change and no
+   * decision. These tests exist so that hole cannot silently reopen.
+   */
+  const subject = { location: { lat: 38.9, lng: -77.1 }, propertyType: "single_family" as const };
+  const opts = { radiusMiles: 1.5, lookbackMonths: 12 };
+
+  it("restricts the comp search to public-record jurisdictions", async () => {
+    await new PostgresProvider().fetchCandidates(subject, opts);
+
+    const { sql, params } = captured[0];
+    expect(sql).toContain("jurisdiction = ANY(");
+    expect(params).toContainEqual(["dc", "fairfax", "maryland"]);
+  });
+
+  it("restricts the subject lookup too", async () => {
+    // This path publishes as well: the subject's living area and assessment
+    // are shown on the results screen.
+    await new PostgresProvider().lookupSubject({ lat: 38.9, lng: -77.1 });
+
+    const { sql, params } = captured[0];
+    expect(sql).toContain("jurisdiction = ANY(");
+    expect(params).toContainEqual(["dc", "fairfax", "maryland"]);
+  });
+
+  it("does not include a licensed source by default", async () => {
+    await new PostgresProvider().fetchCandidates(subject, opts);
+
+    const allowed = captured[0].params.find(Array.isArray) as string[];
+    for (const jurisdiction of ["arlington", "loudoun", "titlepro247"]) {
+      expect(allowed).not.toContain(jurisdiction);
+    }
+  });
+
+  it("publishes a source only when explicitly asked", async () => {
+    // The deliberate act, once someone has established it is permitted.
+    await new PostgresProvider({ jurisdictions: ["dc", "arlington"] }).fetchCandidates(subject, opts);
+    expect(captured[0].params).toContainEqual(["dc", "arlington"]);
   });
 });

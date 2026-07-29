@@ -171,18 +171,43 @@ commercial feed supplies without any of it.
 
 ### What actually closes the gap
 
-**Commercial property data** — TitlePro247, which is already licensed. It
-covers Arlington and Loudoun the same way it covers everywhere else, needs no
-FOIA cycle and no manual refresh, and carries the deed-type flag that DC shows
-is worth 1.9pp.
+**Commercial property data** — TitlePro247, which is already licensed, and
+whose client already exists in the sibling `velocity-connectors` repo
+(`lib/titlepro247/`, shipped 2026-07-23). Session auth, order submission,
+XLSX export and parse are all working there.
 
-The blocker there has never been availability. It is that TitlePro247 has no
-published API, so the request shape has to be recovered from what the web
-application itself sends. That is one integration, once — not a standing
-obligation to two county clerks.
+Its export carries everything the engine needs:
+
+```
+lastSaleAmount, lastSaleDate, assessedValue, beds, baths, sqft,
+yearBuilt, lotSize, propertyType, siteAddress*
+```
+
+**It is a batch source, not a query API.** A TitlePro247 "search" is a billable,
+asynchronous farm-list *order* — submit, poll, download, parse. It cannot go in
+a request path at any price, so it is ingested into `sales` and served from
+Postgres. See `lib/comps/providers/titlepro247.ts` and
+`scripts/ingest-titlepro.ts`. This is why the datastore is a **prerequisite**
+for Northern Virginia coverage rather than a latency optimisation.
+
+Two things the export does *not* carry, both handled at ingest:
+
+- **No coordinates.** Only `distanceFeet` from the search centre, which fixes a
+  radius and not a position. Addresses are geocoded through the Census Bureau's
+  free batch service — 92% matched on real Arlington and Loudoun addresses.
+- **No parcel number.** The normalised site address stands in as the natural
+  key, which keeps re-ingest idempotent.
+
+⚠️ **Licensing is unresolved and gates all of this.** Everything published today
+is county public record with no redistribution restriction. TitlePro247 is
+licensed to a real-estate professional, and it is not established that its data
+may be shown to anonymous consumers on a public valuation page. Ingest is
+deliberately separate from serving: rows can land in the table without
+`/api/avm` ever reading them, so the question can be settled before anything
+reaches a homeowner.
 
 **Scraping the county property-search applications** remains the fallback if
-that stalls. Brittle, and it puts a third party's uptime in the request path;
-if taken, ingest on a schedule into our own store rather than calling at
+that answer is no. Brittle, and it puts a third party's uptime in the request
+path; if taken, ingest on a schedule into our own store rather than calling at
 request time, so a broken scraper degrades to stale data instead of no
 valuation.

@@ -93,6 +93,20 @@ jurisdiction, and the query side is a new `CompsProvider` reading from Postgres.
 which also means the existing backtests can validate the ingested data against
 the same holdout method before it serves anyone.
 
+### It is also a PREREQUISITE, not only an optimisation
+
+The framing above is latency, and that was the original motivation. It
+undersells it.
+
+TitlePro247 — the only viable source for Arlington and Loudoun, which publish
+no sale price or assessed value at all — is a **batch** source. A search there
+is a billable, asynchronous farm-list order: submit, poll, download XLSX,
+parse. It cannot be called per valuation at any price or any latency.
+
+So there is no version of Northern Virginia coverage that does not go through
+a local table. `scripts/ingest-titlepro.ts` writes into this schema. Without
+the datastore, those two counties simply cannot be served.
+
 ### Status — code is written, database is not provisioned
 
 | | |
