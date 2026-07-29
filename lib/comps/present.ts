@@ -52,7 +52,7 @@ export interface PublicComp {
  * the comp's point of view: a positive adjustment means the comp was inferior
  * and its price is revised up toward the subject.
  */
-const LABELS: Record<string, string> = {
+export const LABELS: Record<string, string> = {
   time: "Market movement since it sold",
   assessed: "Difference in assessed value",
   gla: "Difference in living area",
@@ -69,9 +69,24 @@ const LABELS: Record<string, string> = {
  */
 const MATERIAL_ADJUSTMENT = 5_000;
 
-export function toPublicComps(scored: ScoredComp[]): PublicComp[] {
+/**
+ * Shown when a source publishes no street address for a sale and none could be
+ * resolved. Honest, and the rest of the row — distance, date, price, size —
+ * still carries the comparison. Fairfax is the case: its sales layer carries
+ * only a parcel identifier, and "0311 17 0027" reads as a database leak.
+ */
+const UNNAMED_COMP = "Nearby home";
+
+/**
+ * @param addresses Optional id → street address, from a provider's
+ * `resolveAddresses`. Used where the sales feed itself carries none.
+ */
+export function toPublicComps(
+  scored: ScoredComp[],
+  addresses?: Map<string, string>
+): PublicComp[] {
   return scored.map(s => ({
-    address: titleCase(s.comp.address),
+    address: publicAddress(s.comp.address, addresses?.get(s.comp.id)),
     soldPrice: Math.round(s.comp.soldPrice),
     soldDate: s.comp.soldDate,
     distanceMiles: Number(s.distanceMiles.toFixed(2)),
@@ -89,6 +104,11 @@ export function toPublicComps(scored: ScoredComp[]): PublicComp[] {
         amount: Math.round(amount),
       })),
   }));
+}
+
+function publicAddress(raw: string, resolved?: string): string {
+  const best = (resolved ?? raw ?? "").trim();
+  return best ? titleCase(best) : UNNAMED_COMP;
 }
 
 /**

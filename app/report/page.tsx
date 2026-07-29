@@ -3,46 +3,18 @@
 import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
+import {
+  decodeReportPayload,
+  ReportComp,
+  ReportPayload,
+  ReportValuation,
+} from "@/lib/report-payload";
 
-type AddressData = {
-  full: string;
-  streetNumber: string;
-  streetName: string;
-  city: string;
-  state: string;
-  zipCode: string;
-  lat?: number;
-  lng?: number;
-};
-
-type ValuationData = {
-  estimate: number | null;
-  low: number | null;
-  high: number | null;
-  confidence: string;
-  source: string;
-  degraded?: boolean;
-  fmr?: {
-    studio: number;
-    oneBr: number;
-    twoBr: number;
-    threeBr: number;
-    fourBr: number;
-  };
-  areaMedianIncome?: number | null;
-  pricePerSqft?: number | null;
-  rentZestimate?: number | null;
-  beds?: number | null;
-  baths?: number | null;
-  sqft?: number | null;
-  yearBuilt?: number | null;
-  homeType?: string | null;
-};
-
-type ReportData = {
-  address: AddressData;
-  valuation: ValuationData;
-};
+// The payload shape is defined once, in lib/report-payload.ts, and shared with
+// the route that writes it — it used to be re-declared here by hand and had
+// already drifted from what the encoder actually sent.
+type ValuationData = ReportValuation;
+type ReportData = ReportPayload;
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -95,6 +67,94 @@ function Row({
   );
 }
 
+/**
+ * The sales behind the number.
+ *
+ * The results screen has shown these since the estimate stopped being a figure
+ * from nowhere; the shareable report — the artifact that actually gets
+ * forwarded to a spouse, or to another agent — did not, and still described an
+ * estimate "based on comparable sales" without naming one. This closes that.
+ *
+ * Absent on links generated before the payload carried comps, so it renders
+ * nothing rather than an empty section.
+ */
+function ComparableSales({ comps }: { comps: ReportComp[] }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? comps : comps.slice(0, 3);
+
+  return (
+    <div className="glass rounded-2xl p-5 md:p-6 gold-border">
+      <h3 className="text-gold font-bold text-xs uppercase tracking-wider mb-1 flex items-center gap-2">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg>
+        Sales this estimate is based on
+      </h3>
+      <p className="text-white/40 text-xs mb-4">
+        Every one is a public record you can verify.
+      </p>
+
+      <ul className="space-y-2">
+        {shown.map(c => (
+          <li
+            key={`${c.address}-${c.soldDate}`}
+            className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+          >
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-white/90 text-sm font-medium">{c.address}</span>
+              <span className="text-white font-semibold text-sm whitespace-nowrap">
+                {formatCurrency(c.soldPrice)}
+              </span>
+            </div>
+
+            <p className="text-white/40 text-xs mt-1">
+              {c.distanceMiles} mi away
+              {" · "}
+              {c.monthsAgo === 0 ? "sold this month" : `sold ${c.monthsAgo}mo ago`}
+              {c.sqft ? ` · ${c.sqft.toLocaleString()} sqft` : ""}
+              {c.beds ? ` · ${c.beds} bd` : ""}
+              {c.baths ? ` · ${c.baths} ba` : ""}
+            </p>
+
+            {c.adjustments.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-white/10">
+                {c.adjustments.map(a => (
+                  <p key={a.label} className="text-white/40 text-xs flex justify-between gap-3">
+                    <span>{a.label}</span>
+                    <span className={a.amount >= 0 ? "text-green-400/70" : "text-red-400/70"}>
+                      {a.amount >= 0 ? "+" : "−"}
+                      {formatCurrency(Math.abs(a.amount))}
+                    </span>
+                  </p>
+                ))}
+                <p className="text-white/60 text-xs flex justify-between gap-3 mt-1 font-medium">
+                  <span>Comparable to this home</span>
+                  <span>{formatCurrency(c.adjustedPrice)}</span>
+                </p>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {comps.length > 3 && (
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="text-gold/80 hover:text-gold text-xs mt-3 font-medium transition-colors"
+        >
+          {open ? "Show fewer" : `Show all ${comps.length} sales`}
+        </button>
+      )}
+
+      <p className="text-white/30 text-xs mt-3">
+        Sale prices are public record. Each is adjusted for how it differs from this
+        home — a smaller house nearby implies a higher value, and vice versa.
+      </p>
+    </div>
+  );
+}
+
 function ReportContent() {
   const searchParams = useSearchParams();
   const [data, setData] = useState<ReportData | null>(null);
@@ -105,12 +165,9 @@ function ReportContent() {
   useEffect(() => {
     const raw = searchParams.get("d");
     if (!raw) { setError(true); return; }
-    try {
-      const decoded = JSON.parse(atob(decodeURIComponent(raw)));
-      setData(decoded);
-    } catch {
-      setError(true);
-    }
+    const decoded = decodeReportPayload(raw);
+    if (decoded) setData(decoded);
+    else setError(true);
   }, [searchParams]);
 
   const handleCopyLink = async () => {
@@ -404,7 +461,12 @@ function ReportContent() {
         </div>
 
         {/* ══════════════════════════════════════════════════════════════
-            4. RENTAL MARKET ANALYSIS
+            4. COMPARABLE SALES — the evidence for the number above
+        ══════════════════════════════════════════════════════════════ */}
+        {valuation.comps?.length ? <ComparableSales comps={valuation.comps} /> : null}
+
+        {/* ══════════════════════════════════════════════════════════════
+            5. RENTAL MARKET ANALYSIS
         ══════════════════════════════════════════════════════════════ */}
         <div className="glass rounded-2xl p-5 md:p-6 border border-white/10">
           <h3 className="text-gold font-bold text-xs uppercase tracking-wider mb-5 flex items-center gap-2">
@@ -435,7 +497,7 @@ function ReportContent() {
         </div>
 
         {/* ══════════════════════════════════════════════════════════════
-            5. CANDEE CTA
+            6. CANDEE CTA
         ══════════════════════════════════════════════════════════════ */}
         <div className="rounded-2xl p-6 md:p-8 border-2 border-gold/40 bg-gradient-to-br from-gold/10 to-navy">
           <p className="text-white font-bold text-xl mb-1 text-center md:text-left">

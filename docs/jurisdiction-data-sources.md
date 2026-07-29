@@ -24,11 +24,34 @@ integrate it.
 
 ## Integrated
 
-| Jurisdiction | Sale price | Assessed value | Characteristics | Arm's-length | MdAPE |
-|---|---|---|---|---|---|
-| Washington, DC | yes | yes | beds, baths, GBA, condition, year | **yes** | **4.5%** |
-| Fairfax County, VA | yes | yes | none | inferred | **5.3%** |
-| Maryland (all 24) | yes | yes | sqft, lot, year, grade | inferred | **8.7%** |
+| Jurisdiction | Sale price | Assessed value | Characteristics | Arm's-length | Street address | MdAPE |
+|---|---|---|---|---|---|---|
+| Washington, DC | yes | yes | beds, baths, GBA, condition, year | **yes** | yes | **4.5%** |
+| Fairfax County, VA | yes | yes | none | inferred | **no — see below** | **5.3%** |
+| Maryland (all 24) | yes | yes | sqft, lot, year, grade | inferred | yes | **8.7%** |
+
+### Fairfax publishes no street address with a sale
+
+Its sales layer carries only the parcel identifier (PIN), and so does every
+other Fairfax service checked — `ParcelsPlus`, `OpenData_A9/Parcels` and
+`ParcelPlusAssessedValues` all publish PIN and geometry, no situs address.
+
+That did not matter while comps were internal. It mattered the moment they were
+shown to homeowners, who saw six rows reading `0311 17 0027`.
+
+The one public source that has addresses is the county's own locator,
+`Locators/FairfaxCountyAddresses/GeocodeServer`, which takes a point rather
+than a PIN. `FairfaxCountyProvider.resolveAddresses` reverse-geocodes the
+parcel centroid for the six comps that will actually be shown — not the
+candidate pool — at roughly 240ms for the batch warm, 1s cold.
+
+**The match is verified against the PIN the locator returns.** Measured over 18
+comps across McLean, Annandale and Springfield: 14 resolved, 4 rejected, and
+every rejection was an *adjacent* parcel (`0804 02030013` → `0804 02030012`).
+Widening the search to 1,000m returns the same neighbour, so those parcels have
+no address point of their own. Without the check, all four would have been
+published under the house next door's address. Unmatched comps read
+"Nearby home".
 
 The assessment-ratio band is set per source, not globally, because the right
 setting depends on whether the source publishes an arm's-length flag. Measured
