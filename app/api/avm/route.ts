@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { TtlCache, addressCacheKey } from "@/lib/cache";
+import { addressCacheKey } from "@/lib/cache";
+import { getKv } from "@/lib/kv";
 import { RateLimiter, clientKey } from "@/lib/rate-limit";
 import { valueFromComps } from "@/lib/comps";
 import type { CompsProvider, SubjectProperty } from "@/lib/comps/types";
@@ -27,8 +28,7 @@ const SIDECAR_TIMEOUT_MS = 4000;
  * lookups of the same address are common (users re-running the flow, embeds
  * being refreshed). Caching keeps those off the paid upstream.
  */
-const CACHE_TTL_MS = 60 * 60 * 1000;
-const valuationCache = new TtlCache<Record<string, unknown>>(CACHE_TTL_MS, 500);
+const CACHE_TTL_SECONDS = 60 * 60;
 
 // 10 request burst, sustained ~1 every 6s. Comfortable for a human working
 // through the funnel; hostile to a script enumerating addresses.
@@ -318,11 +318,14 @@ function noValuation(
  * result means something upstream is broken, and we want the first request
  * after recovery to see real data rather than a stale fallback.
  */
-const DEGRADED_TTL_MS = 60 * 1000;
+const DEGRADED_TTL_SECONDS = 60;
 
-function respond(cacheKey: string | null, payload: Record<string, unknown>) {
+async function respond(cacheKey: string | null, payload: Record<string, unknown>) {
   if (cacheKey) {
-    valuationCache.set(cacheKey, payload, payload.degraded ? DEGRADED_TTL_MS : undefined);
+    // Never let a cache write failure cost the caller their valuation.
+    await getKv()
+      .set(cacheKey, payload, payload.degraded ? DEGRADED_TTL_SECONDS : CACHE_TTL_SECONDS)
+      .catch(err => console.warn(`[avm] cache write failed: ${(err as Error)?.message}`));
   }
   return NextResponse.json(payload);
 }
@@ -356,7 +359,9 @@ export async function POST(req: NextRequest) {
   const fullAddress = passedFullAddress || [address, city, state, zipCode].filter(Boolean).join(", ");
 
   const cacheKey = addressCacheKey({ address, city, state, zipCode });
-  const cached = valuationCache.get(cacheKey);
+  const cached = await getKv()
+    .get<Record<string, unknown>>(cacheKey)
+    .catch(() => null);
   if (cached) {
     return NextResponse.json({ ...cached, cached: true });
   }
@@ -378,7 +383,7 @@ export async function POST(req: NextRequest) {
           `[avm] valued from ${valued.compCount} ${valued.source} comps ` +
             `(confidence ${valued.confidence})`
         );
-        return respond(cacheKey, {
+        return await respond(cacheKey, {
           estimate: valued.estimate,
           low: valued.low,
           high: valued.high,
@@ -411,7 +416,7 @@ export async function POST(req: NextRequest) {
   if (!VALUATION_API_URL) {
     const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
     console.warn("[avm] no county comps and VALUATION_API_URL not configured");
-    return respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
+    return await respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
   }
 
   try {
@@ -439,17 +444,17 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       console.error(`[avm] upstream returned ${res.status} — no valuation available`);
-      return respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
+      return await respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
     }
 
     const data = await res.json();
 
     if (data.source === "estimate" || !data.average) {
       console.warn("[avm] upstream had no property-level match — no valuation available");
-      return respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
+      return await respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
     }
 
-    return respond(cacheKey, {
+    return await respond(cacheKey, {
       estimate: data.average,
       low: data.low,
       high: data.high,
@@ -473,7 +478,7 @@ export async function POST(req: NextRequest) {
     const reason = (err as Error)?.name === "AbortError" ? "timed out" : String(err);
     console.error(`[avm] upstream unreachable (${reason}) — no valuation available`);
     const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
-    return respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
+    return await respond(cacheKey, noValuation(fullAddress, areaMedianIncome, fmr));
   }
 }
 
