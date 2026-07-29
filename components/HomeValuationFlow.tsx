@@ -47,14 +47,19 @@ export type ValuationData = {
   compRadiusMiles?: number;
   lookbackMonths?: number;
   assessedValue?: number;
+  /** The sales the estimate is actually built from. See lib/comps/present.ts. */
   comps: {
     address: string;
     soldPrice: number;
-    beds: number;
-    baths: number;
-    sqft: number;
     soldDate: string;
-    pricePerSqft?: number;
+    distanceMiles: number;
+    monthsAgo: number;
+    sqft?: number;
+    beds?: number;
+    baths?: number;
+    yearBuilt?: number;
+    adjustedPrice: number;
+    adjustments: { label: string; amount: number }[];
   }[];
   streetViewUrl?: string;
   /** Present only when real HUD data was retrieved; null otherwise. */
