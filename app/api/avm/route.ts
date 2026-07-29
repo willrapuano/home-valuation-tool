@@ -6,6 +6,7 @@ import { valueFromComps } from "@/lib/comps";
 import { shouldPublishEstimate } from "@/lib/comps/publish";
 import { toPublicComps } from "@/lib/comps/present";
 import type { CompsProvider, SubjectProperty } from "@/lib/comps/types";
+import type { EngineOptions } from "@/lib/comps/config";
 import { FairfaxCountyProvider } from "@/lib/comps/providers/fairfax";
 import { MarylandProvider } from "@/lib/comps/providers/maryland";
 import { DcProvider } from "@/lib/comps/providers/dc";
@@ -169,6 +170,11 @@ const COVERAGE: {
   bbox: { minLat: number; maxLat: number; minLng: number; maxLng: number };
   /** Skip entirely when unconfigured, rather than failing a query per request. */
   enabled?: () => boolean;
+  /**
+   * Engine settings that differ for this source because its DATA differs —
+   * not because its market does. Anything here needs a measured reason.
+   */
+  engineOptions?: Partial<EngineOptions>;
   create: () => CompsProvider & {
     lookupSubject(location: { lat: number; lng: number }): Promise<
       (Partial<SubjectProperty> & { lastSalePrice?: number; lastSaleDate?: string }) | null
@@ -205,6 +211,26 @@ const COVERAGE: {
     name: "maryland",
     bbox: { minLat: 37.88, maxLat: 39.73, minLng: -79.49, maxLng: -74.98 },
     create: () => new MarylandProvider(),
+    engineOptions: {
+      // Maryland does not publish whether a sale was arm's-length, so the
+      // assessment-ratio band is standing in for that flag — and measured
+      // against 246 holdout sales it was costing more than it gained:
+      //
+      //   band     maryland    dc     fairfax
+      //   ±12%       10.0%    4.6%     5.0%
+      //   ±25%        9.0%    4.4%     4.7%   <- was shipped everywhere
+      //   ±50%        8.6%    4.6%     4.6%
+      //   off         8.3%    4.9%     4.6%
+      //
+      // Monotonic in Maryland across six settings, worth 0.4pp here. DC moves
+      // the OTHER way, because DC publishes the real flag and the band is a
+      // useful second check there rather than a proxy — which is why this is
+      // per-source and not a new global default.
+      //
+      // ±50% rather than off: it still rejects the egregious cases Maryland
+      // genuinely carries, like a $1,200 assessment against a $1.4M sale.
+      maxAssessmentRatioDeviation: 0.5,
+    },
   },
 ];
 
@@ -271,7 +297,7 @@ async function attempt(
       subdivision: subjectInfo.subdivision,
     };
 
-    const result = valueFromComps(subject, comps);
+    const result = valueFromComps(subject, comps, coverage.engineOptions);
     if (result.estimate === null) return null;
 
     const maxDistance = result.comps.reduce((m, c) => Math.max(m, c.distanceMiles), 0);
