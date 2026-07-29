@@ -3,6 +3,7 @@ import { addressCacheKey } from "@/lib/cache";
 import { getKv } from "@/lib/kv";
 import { RateLimiter, clientKey } from "@/lib/rate-limit";
 import { valueFromComps } from "@/lib/comps";
+import { shouldPublishEstimate } from "@/lib/comps/publish";
 import type { CompsProvider, SubjectProperty } from "@/lib/comps/types";
 import { FairfaxCountyProvider } from "@/lib/comps/providers/fairfax";
 import { MarylandProvider } from "@/lib/comps/providers/maryland";
@@ -293,7 +294,8 @@ async function attempt(
 function noValuation(
   address: string,
   areaMedianIncome: number | null,
-  fmr?: FmrResult
+  fmr?: FmrResult,
+  reason: "no_data" | "low_confidence" = "no_data"
 ): Record<string, unknown> {
   return {
     estimate: null,
@@ -302,8 +304,14 @@ function noValuation(
     confidence: "none",
     source: "unavailable",
     degraded: true,
+    // Distinguished so the two cases can be told apart in logs and analytics:
+    // "we have no data here" is a coverage problem, "the comps disagreed too
+    // much to publish" is a property problem, and they need different fixes.
     degradedReason:
-      "We couldn't retrieve verified sales data for this property, so no automated estimate was produced.",
+      reason === "low_confidence"
+        ? "The recent sales near this property vary too widely to produce a reliable automated estimate."
+        : "We couldn't retrieve verified sales data for this property, so no automated estimate was produced.",
+    degradedCode: reason,
     comps: [],
     streetViewUrl: buildStreetViewUrl(address),
     fmr: fmr?.source === "hud" ? fmr.values : null,
@@ -377,6 +385,26 @@ export async function POST(req: NextRequest) {
   if (typeof lat === "number" && typeof lng === "number") {
     try {
       const valued = await valueFromCountyRecords(lat, lng);
+
+      // Producing an estimate and publishing one are separate decisions.
+      // Measured over 291 holdout sales, 40% of low-confidence estimates are
+      // more than 20% wrong around a range a median 80% wide — an anchor
+      // rather than information. See lib/comps/publish.ts.
+      if (valued) {
+        const decision = shouldPublishEstimate(valued);
+        if (!decision.publish) {
+          const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
+          console.info(
+            `[avm] withholding ${valued.source} estimate: ${decision.reason} ` +
+              `(${valued.compCount} comps, score ${valued.confidenceScore.toFixed(2)})`
+          );
+          return await respond(
+            cacheKey,
+            noValuation(fullAddress, areaMedianIncome, fmr, "low_confidence")
+          );
+        }
+      }
+
       if (valued) {
         const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
         console.info(
