@@ -157,7 +157,10 @@ unconstrained fit on 40 noisy records produces negative dollars per square foot
 often enough to matter.
 
 Adding a jurisdiction is a provider plus a bounding box, not a calibration
-exercise.
+exercise — *provided the jurisdiction publishes sale prices and assessed
+values*. Many do not. See `docs/jurisdiction-data-sources.md` for what each one
+actually publishes, including why Arlington and Loudoun cannot be added on
+public data alone.
 
 ### Known limitation: the upstream is the weak link
 
