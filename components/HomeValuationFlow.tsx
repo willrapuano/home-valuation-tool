@@ -5,6 +5,7 @@ import Step1Address from "./steps/Step1Address";
 import Step2Loading from "./steps/Step2Loading";
 import Step3LeadGate from "./steps/Step3LeadGate";
 import Step4Results from "./steps/Step4Results";
+import { track } from "@/lib/track";
 
 export type AddressData = {
   full: string;
@@ -35,6 +36,10 @@ export type ValuationData = {
   /** True when no property-level valuation is available. */
   degraded?: boolean;
   degradedReason?: string;
+  /** "low_confidence" or "no_data" when nothing was published. */
+  degradedCode?: string;
+  /** Which public-records source served it. */
+  sourceJurisdiction?: string;
   /** 0–1 score behind the confidence bucket. */
   confidenceScore?: number;
   /** How the estimate was reached — used to describe the method to the user. */
@@ -84,11 +89,20 @@ export default function HomeValuationFlow() {
     setAddress(data);
     setSqft(estimatedSqft);
     setAddressError(null);
+    track("address_submitted", { zipCode: data.zipCode });
     setStep(2);
   }, []);
 
   const handleLoadingComplete = useCallback((data: ValuationData) => {
     setValuation(data);
+    // The fork we are measuring: the lead gate reads "Your estimate is ready!"
+    // when there is a number and "One last step" when there is not.
+    track("valuation_returned", {
+      hasEstimate: !data.degraded && data.estimate !== null,
+      confidence: data.confidence,
+      degradedCode: data.degradedCode,
+      jurisdiction: data.sourceJurisdiction,
+    });
     setStep(3);
   }, []);
 
@@ -101,8 +115,19 @@ export default function HomeValuationFlow() {
 
   const handleLeadSubmit = useCallback((data: LeadData) => {
     setLead(data);
+    // Tagged with the same fork so conversion can be split by it. The email
+    // itself is never sent to the events endpoint.
+    track("lead_submitted", {
+      hasEstimate: valuation ? !valuation.degraded && valuation.estimate !== null : undefined,
+      confidence: valuation?.confidence,
+      degradedCode: valuation?.degradedCode,
+      jurisdiction: valuation?.sourceJurisdiction,
+    });
+    track("report_viewed", {
+      hasEstimate: valuation ? !valuation.degraded && valuation.estimate !== null : undefined,
+    });
     setStep(4);
-  }, []);
+  }, [valuation]);
 
   const handleStartOver = useCallback(() => {
     setStep(1);

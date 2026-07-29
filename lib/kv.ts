@@ -38,6 +38,13 @@ export interface KvStore {
   readonly name: string;
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, value: T, ttlSeconds: number): Promise<void>;
+  /**
+   * Atomic increment, returning the new value, or null if this store cannot
+   * count meaningfully. Per-instance memory returns null on purpose: a counter
+   * that only sees one lambda's traffic is not a smaller number, it is a wrong
+   * one, and reporting it as a total would be worse than reporting nothing.
+   */
+  incr(key: string): Promise<number | null>;
 }
 
 const REMOTE_TIMEOUT_MS = 1_500;
@@ -60,6 +67,11 @@ class MemoryKv implements KvStore {
 
   async set<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
     this.store.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+  }
+
+  /** See the interface: a per-instance total is a wrong total. */
+  async incr(): Promise<number | null> {
+    return null;
   }
 }
 
@@ -112,6 +124,24 @@ export class RestKv implements KvStore {
   async set<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
     await this.command(["SET", key, JSON.stringify(value), "EX", Math.max(1, Math.floor(ttlSeconds))]);
   }
+
+  async incr(key: string): Promise<number | null> {
+    const result = await this.command(["INCR", key]);
+    return typeof result === "number" ? result : null;
+  }
+
+  /** Read many counters in one round trip. */
+  async mget(keys: string[]): Promise<Record<string, number>> {
+    if (!keys.length) return {};
+    const raw = await this.command(["MGET", ...keys]);
+    const values = Array.isArray(raw) ? raw : [];
+    const out: Record<string, number> = {};
+    keys.forEach((k, i) => {
+      const n = Number(values[i]);
+      if (Number.isFinite(n)) out[k] = n;
+    });
+    return out;
+  }
 }
 
 /**
@@ -157,6 +187,22 @@ export class TieredKv implements KvStore {
     } catch (err) {
       console.warn(`[kv] remote write failed, memory only: ${(err as Error)?.message}`);
     }
+  }
+
+  /** Only the shared store can count; memory returns null by design. */
+  async incr(key: string): Promise<number | null> {
+    if (!this.remote) return null;
+    try {
+      return await this.remote.incr(key);
+    } catch (err) {
+      console.warn(`[kv] counter increment failed: ${(err as Error)?.message}`);
+      return null;
+    }
+  }
+
+  /** The shared store, when configured, for bulk counter reads. */
+  get shared(): KvStore | undefined {
+    return this.remote;
   }
 }
 
