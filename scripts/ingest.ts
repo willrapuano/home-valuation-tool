@@ -5,7 +5,7 @@
  *   npx tsx scripts/ingest.ts dc maryland     # named ones
  *   npx tsx scripts/ingest.ts --months 24     # deeper history
  *
- * Requires DATABASE_URL and a schema already applied (db/schema.sql).
+ * Requires DATABASE_URL. The schema is applied automatically if missing.
  *
  * HOW IT WORKS
  *
@@ -27,6 +27,7 @@ import { FairfaxCountyProvider } from "../lib/comps/providers/fairfax";
 import { MarylandProvider } from "../lib/comps/providers/maryland";
 import { ComparableSale, CompsProvider } from "../lib/comps/types";
 import { databaseUrl } from "../lib/db";
+import { applySchema, schemaStatus } from "./migrate";
 
 interface Jurisdiction {
   name: string;
@@ -197,8 +198,7 @@ async function main() {
     console.error(
       "DATABASE_URL is not set.\n\n" +
         "  1. Create a Postgres database (Vercel Storage, Neon or Supabase).\n" +
-        "  2. Apply the schema:  psql \"$DATABASE_URL\" -f db/schema.sql\n" +
-        "  3. Re-run this script.\n\n" +
+        "  2. Re-run this script — it applies the schema itself.\n\n" +
         "Use the POOLED connection string, not the direct one."
     );
     process.exit(1);
@@ -210,11 +210,23 @@ async function main() {
     ssl: url.includes("localhost") ? undefined : { rejectUnauthorized: false },
   });
 
-  try {
-    await pool.query("SELECT postgis_version()");
-  } catch {
-    console.error("PostGIS is not installed on this database. Apply db/schema.sql first.");
-    process.exit(1);
+  // Apply the schema rather than requiring someone to have run psql months
+  // earlier. The whole file is CREATE ... IF NOT EXISTS, so this is a no-op on
+  // an already-migrated database. A database that is provisioned but unmigrated
+  // reports itself as configured, which is how this one sat with
+  // `relation "sales" does not exist` while looking fine.
+  const missing = await schemaStatus(pool);
+  if (missing) {
+    console.log(`  applying schema (${missing})...`);
+    try {
+      await applySchema(pool);
+    } catch (err) {
+      console.error(
+        `Could not apply the schema: ${(err as Error)?.message}\n` +
+          `PostGIS may not be available to this database role.`
+      );
+      process.exit(1);
+    }
   }
 
   for (const j of TARGETS) {

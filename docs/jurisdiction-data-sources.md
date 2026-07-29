@@ -140,27 +140,49 @@ parcel geometry for planning purposes and keep assessment and sales behind a
 property-search application.
 
 So the remaining Northern Virginia gap is not an engineering problem, it is an
-acquisition problem. The options, in order of cost:
+acquisition problem.
 
-1. **Records request / bulk extract** from each county assessor. Often free or
-   near-free, and produces exactly the two fields that matter. Slow to arrange,
-   and needs a refresh cadence. **Drafted and ready to send:**
-   `records-request-arlington.md`, `records-request-loudoun.md`.
+### Records requests — considered and REJECTED
 
-   Both ask for the parcel identifier first, because we already hold the
-   geometry for both counties — only the attributes are missing, and they join
-   on a key the counties already publish. Both also ask for the assessor's
-   arm's-length/validity code, which DC showed is worth 1.9pp.
+Letters to the Arlington and Loudoun assessors were drafted and then dropped
+without being sent. Recording why, because it is a proposal that looks sensible
+on paper and will otherwise be reinvented.
 
-   Each letter opens with a phone call rather than a filing: localities often
-   sell a standing assessment extract outside FOIA, which is faster, cheaper,
-   and comes with a refresh schedule.
-2. **Commercial property data** (TitlePro247, TitleFlex, or an MLS feed).
-   Worth noting where the value actually is: not accuracy in the jurisdictions
-   already covered, where public assessments are already doing the work, but
-   coverage in the ones that publish nothing — plus the deed-type flag, which
-   DC shows is worth ~1.9pp.
-3. **Scraping the county property-search applications.** Brittle, and it puts
-   a third party's uptime in the request path. If taken, ingest on a schedule
-   into our own store rather than calling at request time, so a broken scraper
-   degrades to stale data instead of no valuation.
+A FOIA extract is a **point-in-time snapshot**. Keeping it useful means
+re-requesting, re-downloading and re-ingesting it forever, by hand, because
+nothing about a records request is automatable. And `scripts/lag-cost.ts`
+measured what stale comps cost:
+
+| data cutoff | MdAPE | coverage |
+|---|---|---|
+| same week | 5.3% | 93% |
+| 90 days | 7.0% | 73% |
+| 135 days | 7.8% | 61% |
+
+A quarterly refresh — optimistic for a FOIA cycle — lands at the 90-day row or
+worse. That is Maryland's situation, the worst of the three sources, adopted
+deliberately. And it degrades from there the first time the refresh is skipped,
+which for a manual chore on a solo agent's calendar is soon. The failure is
+silent: stale comps produce confident-looking numbers.
+
+So the realistic outcome is two counties served worse than the three already
+covered, plus a permanent recurring chore, in exchange for coverage that a
+commercial feed supplies without any of it.
+
+### What actually closes the gap
+
+**Commercial property data** — TitlePro247, which is already licensed. It
+covers Arlington and Loudoun the same way it covers everywhere else, needs no
+FOIA cycle and no manual refresh, and carries the deed-type flag that DC shows
+is worth 1.9pp.
+
+The blocker there has never been availability. It is that TitlePro247 has no
+published API, so the request shape has to be recovered from what the web
+application itself sends. That is one integration, once — not a standing
+obligation to two county clerks.
+
+**Scraping the county property-search applications** remains the fallback if
+that stalls. Brittle, and it puts a third party's uptime in the request path;
+if taken, ingest on a schedule into our own store rather than calling at
+request time, so a broken scraper degrades to stale data instead of no
+valuation.
