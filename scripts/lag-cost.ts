@@ -44,6 +44,23 @@
  * about what a homeowner asking TODAY receives. DC and Fairfax are unaffected —
  * they publish within 10 days, so their backtest conditions match production.
  *
+ * DOES THE CONFIDENCE LABEL SURVIVE IT? Largely yes, which was not the
+ * expectation going in:
+ *
+ *   cutoff            high        medium         low
+ *   same week    4.3% (62%)    6.6% (29%)   9.5% (10%)
+ *   90 days      5.7% (57%)    8.6% (37%)  10.6%  (6%)
+ *
+ * High confidence degrades from 4.3% to 5.7% but remains clearly the best
+ * bucket, the ordering holds at every lag, and the SHARE earning the label
+ * falls from 62% to 57% — the engine is already downgrading stale comps
+ * without being told to. The `recency` scoring dimension is doing that work.
+ *
+ * So no staleness penalty was added to scoreConfidence. The obvious worry —
+ * that Maryland homeowners see "High Confidence" on estimates the label cannot
+ * support — is not borne out. What remains true is that the same word means
+ * 4.3% in DC and 5.7% in Maryland, which is a real if modest inconsistency.
+ *
  * No free fresher Maryland source exists. Checked: both iMAP layers (identical
  * lag), every service in iMAP's PlanningCadastre catalogue, MDP's own
  * mdpgis.mdp.state.md.us (hosts no sales), Montgomery County open data (tax
@@ -92,6 +109,8 @@ async function main() {
   const byLag = new Map<number, number[]>();
   const byJurLag = new Map<string, Map<number, number[]>>();
   const valued = new Map<number, number>();
+  /** lag|confidence -> errors, to see whether the LABEL survives the lag. */
+  const byConf = new Map<string, number[]>();
   let attempts = 0;
 
   for (const m of MARKETS) {
@@ -136,6 +155,9 @@ async function main() {
         if (r.estimate === null) continue;
 
         const e = Math.abs(((r.estimate - s.soldPrice) / s.soldPrice) * 100);
+        const key = `${lag}|${r.confidence}`;
+        if (!byConf.has(key)) byConf.set(key, []);
+        byConf.get(key)!.push(e);
         if (!byLag.has(lag)) byLag.set(lag, []);
         byLag.get(lag)!.push(e);
         const jj = byJurLag.get(m.jurisdiction)!;
@@ -169,6 +191,24 @@ async function main() {
         JURS.map(j => `${med(byJurLag.get(j)?.get(lag) ?? []).toFixed(1)}%`.padStart(10)).join("")
     );
   }
+  console.log(`\n${"═".repeat(96)}`);
+  console.log("DOES THE CONFIDENCE LABEL SURVIVE THE LAG?");
+  console.log("═".repeat(96));
+  console.log(`  ${"data cutoff".padEnd(14)}` +
+    ["high", "medium", "low"].map(c => `${c}`.padStart(16)).join(""));
+  console.log("  " + "─".repeat(92));
+  for (const lag of LAGS) {
+    const cells = ["high", "medium", "low"].map(c => {
+      const rows = byConf.get(`${lag}|${c}`) ?? [];
+      const total = ["high", "medium", "low"].reduce(
+        (n, k) => n + (byConf.get(`${lag}|${k}`)?.length ?? 0), 0);
+      if (!rows.length) return "—".padStart(16);
+      return `${med(rows).toFixed(1)}% (${((rows.length / total) * 100).toFixed(0)}%)`.padStart(16);
+    });
+    console.log(`  ${(lag === 1 ? "same week" : `${lag} days`).padEnd(14)}${cells.join("")}`);
+  }
+  console.log("  (median error, and share of predictions carrying that label)");
+
   console.log("═".repeat(96));
   console.log(
     "\n  Maryland lives at the 90-day row in production; DC and Fairfax live at the\n" +
