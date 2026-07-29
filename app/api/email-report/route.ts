@@ -1,9 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { encodeReportUrl, ReportAddress, ReportComp } from "@/lib/report-payload";
 
+/**
+ * Where report links point.
+ *
+ * VERCEL_URL is the DEPLOYMENT-specific hostname — in production it produced
+ * links reading `home-valuation-tool-n5ew7irgi-will-rapuanos-projects.
+ * vercel.app`, which is exactly what a phishing link looks like in an email a
+ * homeowner was not expecting, and which stops resolving if that deployment is
+ * ever removed or rolled back.
+ *
+ * VERCEL_PROJECT_PRODUCTION_URL is the project's stable production domain and
+ * is set automatically alongside it, so it is preferred. NEXT_PUBLIC_BASE_URL
+ * still wins over both, for a custom domain.
+ */
 const BASE_URL =
   process.env.NEXT_PUBLIC_BASE_URL ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://home-valuation-tool.vercel.app");
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "https://home-valuation-tool.vercel.app");
 
 function buildReportUrl(body: {
   address: ReportAddress;
