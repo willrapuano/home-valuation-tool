@@ -66,6 +66,87 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
 /** A valuation that actually produced a number. */
 type ResolvedValuation = ValuationData & { estimate: number; low: number; high: number };
 
+/**
+ * The sales behind the number.
+ *
+ * A Zestimate is a figure from nowhere. What an agent actually does is point at
+ * four houses nearby and explain the differences — and the engine already
+ * computes exactly that, so showing it costs nothing and is the difference
+ * between a number a homeowner believes and one they bounce off.
+ *
+ * It also invites disagreement, which is the point: an argument about which
+ * comps are right is the conversation the agent wants to be in.
+ */
+function ComparableSales({ comps }: { comps: ResolvedValuation["comps"] }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? comps : comps.slice(0, 3);
+
+  return (
+    <div className="mt-5 text-left">
+      <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-2">
+        Sales this estimate is based on
+      </p>
+
+      <ul className="space-y-2">
+        {shown.map(c => (
+          <li
+            key={`${c.address}-${c.soldDate}`}
+            className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+          >
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-white/90 text-sm font-medium">{c.address}</span>
+              <span className="text-white font-semibold text-sm whitespace-nowrap">
+                {formatCurrency(c.soldPrice)}
+              </span>
+            </div>
+
+            <p className="text-white/40 text-xs mt-1">
+              {c.distanceMiles} mi away
+              {" · "}
+              {c.monthsAgo === 0 ? "sold this month" : `sold ${c.monthsAgo}mo ago`}
+              {c.sqft ? ` · ${c.sqft.toLocaleString()} sqft` : ""}
+              {c.beds ? ` · ${c.beds} bd` : ""}
+              {c.baths ? ` · ${c.baths} ba` : ""}
+            </p>
+
+            {c.adjustments.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-white/10">
+                {c.adjustments.map(a => (
+                  <p key={a.label} className="text-white/40 text-xs flex justify-between gap-3">
+                    <span>{a.label}</span>
+                    <span className={a.amount >= 0 ? "text-green-400/70" : "text-red-400/70"}>
+                      {a.amount >= 0 ? "+" : "−"}
+                      {formatCurrency(Math.abs(a.amount))}
+                    </span>
+                  </p>
+                ))}
+                <p className="text-white/60 text-xs flex justify-between gap-3 mt-1 font-medium">
+                  <span>Comparable to your home</span>
+                  <span>{formatCurrency(c.adjustedPrice)}</span>
+                </p>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {comps.length > 3 && (
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="text-gold/80 hover:text-gold text-xs mt-2 font-medium transition-colors"
+        >
+          {open ? "Show fewer" : `Show all ${comps.length} sales`}
+        </button>
+      )}
+
+      <p className="text-white/30 text-xs mt-3">
+        Sale prices are public record. Each is adjusted for how it differs from your
+        home — a smaller house nearby implies a higher value for yours, and vice versa.
+      </p>
+    </div>
+  );
+}
+
 /** Results layout for a real, property-level valuation. */
 function FullResults({
   address,
@@ -235,6 +316,8 @@ function FullResults({
               , adjusted to your property.
             </p>
           ) : null}
+
+          {valuation.comps?.length ? <ComparableSales comps={valuation.comps} /> : null}
 
           {/* Confirmation message — shown after request submitted */}
           {emailSent && (

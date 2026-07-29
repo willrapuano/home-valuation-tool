@@ -4,6 +4,7 @@ import { getKv } from "@/lib/kv";
 import { RateLimiter, clientKey } from "@/lib/rate-limit";
 import { valueFromComps } from "@/lib/comps";
 import { shouldPublishEstimate } from "@/lib/comps/publish";
+import { toPublicComps } from "@/lib/comps/present";
 import type { CompsProvider, SubjectProperty } from "@/lib/comps/types";
 import { FairfaxCountyProvider } from "@/lib/comps/providers/fairfax";
 import { MarylandProvider } from "@/lib/comps/providers/maryland";
@@ -286,6 +287,9 @@ async function attempt(
       lookbackMonths: LOOKBACK_MONTHS,
       assessedValue: subjectInfo.assessedValue,
       source: coverage.name,
+      // The sales the number is actually built from. Previously computed and
+      // then discarded — see lib/comps/present.ts.
+      comps: toPublicComps(result.comps),
     };
   } catch (err) {
     // One dead source must not take down coverage for a region another
@@ -441,7 +445,7 @@ export async function POST(req: NextRequest) {
           // support question about one bad estimate can be traced to a source.
           sourceJurisdiction: valued.source,
           degraded: false,
-          comps: [],
+          comps: valued.comps,
           compCount: valued.compCount,
           compRadiusMiles: valued.compRadiusMiles,
           lookbackMonths: valued.lookbackMonths,
