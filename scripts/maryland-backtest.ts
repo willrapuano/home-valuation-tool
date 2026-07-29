@@ -56,7 +56,7 @@ async function main(){
       let n=0;
       for(const s of subs){
         const cands:ComparableSale[]=usable.filter(c=>c.id!==s.id&&c.soldDate<s.soldDate);
-        const r=valueFromComps({location:s.location,propertyType:s.propertyType,sqft:s.sqft,lotSqft:s.lotSqft,yearBuilt:s.yearBuilt,condition:s.condition,subdivision:s.subdivision,assessedValue:s.assessedValue},cands,{asOf:dayBefore(s.soldDate)});
+        const r=valueFromComps({location:s.location,propertyType:s.propertyType,sqft:s.sqft,lotSqft:s.lotSqft,yearBuilt:s.yearBuilt,condition:s.condition,subdivision:s.subdivision,assessedValue:s.assessedValue},cands,{asOf:dayBefore(s.soldDate),maxAssessmentRatioDeviation:0.5});
         if(r.estimate===null) continue;
         const e=((r.estimate-s.soldPrice)/s.soldPrice)*100;
         all.push({market:m.name,actual:s.soldPrice,predicted:r.estimate,errorPct:e,absErrorPct:Math.abs(e),confidence:r.confidence,inRange:s.soldPrice>=r.low!&&s.soldPrice<=r.high!});

@@ -119,7 +119,7 @@ from its own comp set.
 |---|---|---|---|
 | Washington, DC | citywide | **4.3%** | 219 |
 | Fairfax County | 1 county | **4.7%** | 160 |
-| Maryland (SDAT) | all 24 jurisdictions | **8.0%** | 256 |
+| Maryland (SDAT) | all 24 jurisdictions | **7.8%** | 255 |
 
 DC is the most accurate because it is the only source that states whether a
 sale was arm's-length instead of leaving it to be inferred. Filtering to

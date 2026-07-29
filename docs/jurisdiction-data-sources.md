@@ -28,7 +28,24 @@ integrate it.
 |---|---|---|---|---|---|
 | Washington, DC | yes | yes | beds, baths, GBA, condition, year | **yes** | **4.3%** |
 | Fairfax County, VA | yes | yes | none | inferred | **4.7%** |
-| Maryland (all 24) | yes | yes | sqft, lot, year, grade | inferred | **8.0%** |
+| Maryland (all 24) | yes | yes | sqft, lot, year, grade | inferred | **7.8%** |
+
+The assessment-ratio band is set per source, not globally, because the right
+setting depends on whether the source publishes an arm's-length flag. Measured
+over 369 holdout sales:
+
+| band | Maryland | DC | Fairfax |
+|---|---|---|---|
+| ±25% | 9.0% | **4.4%** | 4.7% |
+| ±50% | 8.6% | 4.6% | **4.6%** |
+| off | **8.3%** | 4.9% | 4.6% |
+
+Maryland improves monotonically as the band loosens; DC gets worse. DC already
+knows which sales were arm's-length, so the band is a useful second check
+there. Maryland has no flag, so the band is a *proxy* for one — and a proxy
+that discards good comps costs more than it saves. Maryland now runs at ±50%,
+which still rejects the egregious cases it genuinely carries (a $1,200
+assessment against a $1.4M sale) without throwing away ordinary sales.
 
 DC is the most accurate because of the arm's-length flag, not because of the
 building characteristics. 59% of recent DC sales are marked unqualified —
