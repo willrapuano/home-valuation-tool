@@ -39,17 +39,33 @@
  * measurement that governs the display is the PRODUCTION path run under the
  * lag — `production-path-backtest.ts 25 90`:
  *
- *     jurisdiction   paired   record subj   live subj   published   MdAPE shown
- *     dc                 37          5.1%        4.5%         90%          4.5%
- *     maryland           44          8.6%       10.3%         67%         11.7%
+ *     run  jurisdiction   paired   record subj   live subj   published   shown
+ *      A   dc                 37          5.1%        4.5%         90%     4.5%
+ *      A   maryland           44          8.6%       10.3%         67%    11.7%
+ *      B   dc                 36          5.7%        5.7%         85%     5.2%
+ *      B   maryland           36          6.8%        8.2%         69%    10.1%
+ *      B   fairfax            49          6.7%        6.7%         96%     6.6%
  *
- * MARYLAND IS 11.7%, not 6.6% and not 9.5%. That is the number displayed, and
- * it is displayed BECAUSE it is honest: a wide measured band beats a blank, and
- * it is the figure a Bethesda homeowner actually receives.
+ * MARYLAND IS 10–12%, not 6.6% and not 9.5%. Two runs at n≈40 straddle about
+ * ±1pp; the higher ships, because these are floors (below). It is displayed
+ * rather than withheld BECAUSE it is honest: a wide measured band beats a
+ * blank, and it is the figure a Bethesda homeowner actually receives.
  *
- * DC at the same 90-day cutoff shows 4.5% against 4.7% unlagged — statistically
- * flat, which is the expected control result for a jurisdiction that publishes
- * within about ten days. DC's and Fairfax's figures stand as measured.
+ * DC IS THE CONTROL AND IT BEHAVES. 4.5% and 5.2% under a 90-day cutoff against
+ * 4.7% unlagged — flat, as expected where records publish within ~10 days. A
+ * harness that moved DC would be measuring itself rather than the lag.
+ *
+ * FAIRFAX UNDER THE SAME LAG IS 6.6%, better than the 7.5% displayed, because
+ * its valuations rest on assessed value and an assessment does not go stale the
+ * way a comp does. The conservative figure is kept.
+ *
+ * Run A sampled only DC and Maryland: Fairfax produced zero rows and the
+ * summary silently omitted it. `production-path-backtest.ts` now prints a
+ * WHERE THE SAMPLE WENT table covering every market asked for, and a
+ * jurisdiction with no rows says "contributed NOTHING" with the reason. Run B
+ * is the first with Fairfax actually in it. Note `maryland/Rockville` failed
+ * the pool fetch in both runs (iMAP timeout), so Maryland rests on Bethesda,
+ * Frederick and Columbia.
  *
  * WHEN A FIGURE IS STILL WITHHELD, the UI shows the data's recency instead —
  * see `recencyLine`. That path remains live for any jurisdiction added without

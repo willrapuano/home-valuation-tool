@@ -48,6 +48,21 @@ difference in which homes were valued as a difference in accuracy, the same
 survivorship error that made a tight search radius look good in
 `adaptive-radius.ts`.*
 
+> ⚠️ **THIS TABLE IS MEASURED AT ZERO PUBLISHING LAG.** It withholds comps only
+> from the sale date onward, which assumes a county publishes a sale the moment
+> it closes. DC and Fairfax roughly do. **Maryland does not** — its state feed
+> runs about a quarter behind, so the Maryland row here describes conditions no
+> Maryland visitor gets.
+>
+> Re-run under that lag (`production-path-backtest.ts 25 90`), Maryland is
+> **10–12%**, not 6.6%, and publishes 69% rather than 68% of the time. Fairfax
+> is 6.6%, slightly better than the 7.5% here. DC is flat.
+>
+> `lib/accuracy.ts` holds the figures the UI is allowed to display and is the
+> authority; this table is kept because it is the like-for-like comparison of
+> the engine path against the product path. **Do not copy the Maryland row into
+> anything user-facing.**
+
 **Engine** hands the valuation a perfect description of the house, straight off
 the row being predicted. That is what every other backtest here measures, and
 it is not available to production, which has only a latitude and longitude.
