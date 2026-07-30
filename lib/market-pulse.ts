@@ -30,7 +30,13 @@
  * statistics.
  */
 
-import { MarketDefinition, resolveMarket, scopeLabel } from "./markets";
+import {
+  allFilters,
+  MarketDefinition,
+  medianDisplayable,
+  resolveMarket,
+  scopeLabel,
+} from "./markets";
 
 /**
  * ONE BUDGET FOR THE WHOLE OPERATION, not per request.
@@ -62,10 +68,13 @@ export interface MarketPulse {
   /** Sales recorded in the window. */
   sales: number;
   /**
-   * True median sale price, in dollars — or null when the median query alone
-   * timed out. The counts are cheap and reliable; the median is the expensive
-   * one, so it is allowed to fail on its own rather than taking the panel with
-   * it. Partial figures beat no figures.
+   * True median sale price, in dollars — or null.
+   *
+   * Null for two reasons, both deliberate. The median query is the expensive
+   * one and is allowed to fail on its own rather than taking the panel with it;
+   * and a market that cannot restrict to dwellings withholds its median
+   * entirely, because an unfiltered one is measurably ~$49,000 out. See
+   * `medianDisplayable` in ./markets.
    */
   medianPrice: number | null;
   /** Sales on file across the engine's full 12-month lookback. */
@@ -95,7 +104,7 @@ function where(m: MarketDefinition, from: Date, to: Date): string {
     `${m.priceField} > ${m.minPrice}`,
     `${m.dateField} > ${m.dateLiteral(from)}`,
     `${m.dateField} <= ${m.dateLiteral(to)}`,
-    ...m.filters,
+    ...allFilters(m),
   ].join(" AND ");
 }
 
@@ -193,7 +202,7 @@ async function newestSaleDate(m: MarketDefinition, signal: AbortSignal): Promise
   const json = await post(
     m,
     {
-      where: [`${m.priceField} > ${m.minPrice}`, ...m.filters].join(" AND "),
+      where: [`${m.priceField} > ${m.minPrice}`, ...allFilters(m)].join(" AND "),
       outFields: m.dateField,
       orderByFields: `${m.dateField} DESC`,
       resultRecordCount: "1",
@@ -239,15 +248,18 @@ export async function fetchMarketPulse(marketKey?: string | null): Promise<Marke
 
     // Attempted, not required. Maryland's median leg alone has been measured at
     // 14.5s; letting that drop the whole hero to a coverage panel would be a
-    // disproportionate response to one slow query.
+    // disproportionate response to one slow query. And a market that cannot
+    // filter to dwellings does not attempt it at all.
     let median: number | null = null;
-    try {
-      median = await medianPrice(market, windowStart, through, sales, signal);
-    } catch (err) {
-      console.warn(
-        `median unavailable for ${market.label}:`,
-        (err as Error)?.message ?? err
-      );
+    if (medianDisplayable(market)) {
+      try {
+        median = await medianPrice(market, windowStart, through, sales, signal);
+      } catch (err) {
+        console.warn(
+          `median unavailable for ${market.label}:`,
+          (err as Error)?.message ?? err
+        );
+      }
     }
 
     return {

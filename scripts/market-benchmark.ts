@@ -25,12 +25,30 @@
  * for the wrong reason.
  *
  * So this is an instrument, not an assertion. Run it, put each median next to
- * the county's or Bright's published figure for the same window, and if they
- * disagree by more than a few percent the filters in lib/markets.ts are wrong —
- * not the market.
+ * the county's or Bright's published figure, and if they disagree by more than
+ * a few percent the filters in lib/markets.ts are wrong — not the market.
+ *
+ * ── MATCH THE WINDOW, OR THE COMPARISON IS MEANINGLESS ───────────────────
+ *
+ * The window printed below ENDS AT THE NEWEST RECORDED SALE, not at today. For
+ * Maryland that is about a quarter ago: Montgomery's $654,300 is a
+ * January–April window, so it must be compared against SPRING closed medians,
+ * not against whatever Bright published this month. Comparing a spring figure
+ * to a summer one will look like a filter bug and is not.
+ *
+ * Two further reasons close beats exact, and exact would be suspicious:
+ *
+ *   - RECORDED vs SETTLED. These are deed recordation dates; Bright reports
+ *     settlement. The two differ by days to weeks and the sets are not
+ *     identical at the window edges.
+ *   - UNIVERSE. Bright sees MLS-listed sales. Public record sees everything
+ *     recorded, including for-sale-by-owner, new construction sold direct,
+ *     estate sales and auctions — which skew differently from listed stock.
+ *
+ * A few points of drift is a pass. A DC-sized $50,000 gap is a filter bug.
  */
 
-import { MARKETS, MarketDefinition, scopeLabel } from "../lib/markets";
+import { allFilters, MARKETS, MarketDefinition, scopeLabel } from "../lib/markets";
 
 const WINDOW_DAYS = 90;
 const TIMEOUT_MS = 60_000;
@@ -105,6 +123,95 @@ function money(n: number | null): string {
   return n === null ? "—" : `$${Math.round(n).toLocaleString("en-US")}`;
 }
 
+/* ── Fairfax: the join a pageview cannot do, done offline ──────────────── */
+
+const FX_ASSESSED =
+  "https://www.fairfaxcounty.gov/mercator/rest/services/GIS/ParcelPlusAssessedValues/MapServer/0/query";
+/**
+ * Fairfax land use codes that are dwellings — the same set
+ * `providers/fairfax.ts` maps to a property type. Everything else is
+ * commercial, industrial, institutional or vacant.
+ */
+const FX_RESIDENTIAL = ["011", "012", "013", "021", "022", "031", "041"];
+/** PINs per `IN (...)` clause. Larger risks a URL/statement length limit. */
+const FX_CHUNK = 150;
+
+/**
+ * WHY THIS EXISTS
+ *
+ * DC's hero median moved $50,000 once non-residential parcels came out. Fairfax
+ * still prints a median with commercial sales inside it, because its sales
+ * layer carries no land-use field — that lives on ParcelPlusAssessedValues, and
+ * a single count query cannot join the two. The panel is honestly relabelled
+ * "property sales", but relabelling is not measuring: nobody knows whether
+ * Fairfax owes the same $50,000 correction DC did.
+ *
+ * A pageview cannot afford this join. An offline diagnostic can: pull the
+ * window's sales with their PINs, then look up land use for those PINs in
+ * chunks. Roughly 30 extra requests against a service that answers in about a
+ * second.
+ *
+ * If the delta is DC-sized, relabelling was the smaller half of the fix and
+ * Fairfax needs an ingested land-use table rather than a live query.
+ */
+async function fairfaxResidentialMedian(
+  m: MarketDefinition,
+  where: string
+): Promise<{ n: number; median: number | null; nonResidentialShare: number } | null> {
+  const sales: { pin: string; price: number }[] = [];
+  for (let offset = 0; offset < 10_000; offset += 2000) {
+    const json = await post(m, {
+      where,
+      outFields: "PIN,PRICE",
+      orderByFields: "PIN ASC",
+      resultOffset: String(offset),
+      resultRecordCount: "2000",
+      returnGeometry: "false",
+    });
+    const rows = json?.features ?? [];
+    for (const f of rows) {
+      const pin = String(f.attributes?.PIN ?? "").trim();
+      const price = f.attributes?.PRICE;
+      if (pin && typeof price === "number" && price > 0) sales.push({ pin, price });
+    }
+    if (rows.length < 2000) break;
+  }
+  if (!sales.length) return null;
+
+  const pins = [...new Set(sales.map(s => s.pin))];
+  const residential = new Set<string>();
+  for (let i = 0; i < pins.length; i += FX_CHUNK) {
+    const chunk = pins.slice(i, i + FX_CHUNK);
+    const res = await fetch(FX_ASSESSED, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        where:
+          `PIN IN (${chunk.map(p => `'${p}'`).join(",")}) AND ` +
+          `LUC IN (${FX_RESIDENTIAL.map(c => `'${c}'`).join(",")})`,
+        outFields: "PIN",
+        returnGeometry: "false",
+        f: "json",
+      }).toString(),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }).then(r => r.json());
+    if (res?.error) throw new Error(res.error.message ?? "assessed layer error");
+    for (const f of res?.features ?? []) {
+      const pin = String(f.attributes?.PIN ?? "").trim();
+      if (pin) residential.add(pin);
+    }
+  }
+
+  const kept = sales.filter(s => residential.has(s.pin)).map(s => s.price).sort((a, b) => a - b);
+  if (!kept.length) return null;
+  const mid = Math.floor(kept.length / 2);
+  return {
+    n: kept.length,
+    median: kept.length % 2 ? kept[mid] : (kept[mid - 1] + kept[mid]) / 2,
+    nonResidentialShare: 1 - kept.length / sales.length,
+  };
+}
+
 async function main() {
   console.log(`Hero figures for every market in lib/markets.ts, ${WINDOW_DAYS}-day window.\n`);
   console.log(
@@ -117,15 +224,21 @@ async function main() {
       `${m.dateField} > ${m.dateLiteral(from)} AND ${m.dateField} <= ${m.dateLiteral(to)}`;
 
     try {
-      const base = [`${m.priceField} > ${m.minPrice}`, ...m.filters].join(" AND ");
+      const base = [`${m.priceField} > ${m.minPrice}`, ...allFilters(m)].join(" AND ");
       const through = new Date(`${await newest(m, base)}T00:00:00Z`);
       const from = new Date(through);
       from.setDate(from.getDate() - WINDOW_DAYS);
 
       const filtered = `${base} AND ${dateTerms(from, through)}`;
-      // Price and date only — what the figures would be with no type or
-      // validity filtering at all. The difference IS the value of the filters.
-      const bare = `${m.priceField} > ${m.minPrice} AND ${dateTerms(from, through)}`;
+      // SCOPE IS KEPT, quality is dropped. Dropping every filter also drops
+      // Maryland's JURSCODE, which compared Montgomery's 2,715 sales against
+      // 21,059 statewide ones and reported the difference as the value of the
+      // land-use filter. The baseline must be the same market, unfiltered.
+      const bare = [
+        `${m.priceField} > ${m.minPrice}`,
+        ...m.scopeFilters,
+        dateTerms(from, through),
+      ].join(" AND ");
 
       const [nFiltered, nBare] = await Promise.all([count(m, filtered), count(m, bare)]);
 
@@ -151,6 +264,28 @@ async function main() {
             ? `   ← filters move the median by ${money(Math.abs(bareMedian - p50))}`
             : "")
       );
+      // Fairfax owes the delta DC already paid. Measure it rather than assume.
+      if (key === "fairfax") {
+        try {
+          const fx = await fairfaxResidentialMedian(m, filtered);
+          if (fx) {
+            console.log(
+              `  residential  n=${fx.n.toLocaleString()}  MEDIAN ${money(fx.median)}` +
+                `   ← ${(fx.nonResidentialShare * 100).toFixed(1)}% of sales are not dwellings` +
+                (p50 !== null && fx.median !== null
+                  ? `, worth ${money(Math.abs(fx.median - p50))}`
+                  : "")
+            );
+            console.log(
+              "               (offline PIN join against ParcelPlusAssessedValues — a" +
+                "\n                pageview cannot do this, an ingest table could)"
+            );
+          }
+        } catch (err) {
+          console.log(`  residential  UNAVAILABLE: ${(err as Error)?.message ?? err}`);
+        }
+      }
+
       console.log();
     } catch (err) {
       console.log(`${m.label}  (${key})`);

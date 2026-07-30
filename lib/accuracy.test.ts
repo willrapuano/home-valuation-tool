@@ -94,14 +94,29 @@ describe("accuracyLine", () => {
   });
 
   /**
-   * THE RULE. Maryland's backtest draws subjects from a pool as lagged as its
-   * comps, so the extrapolation cancels and 6.6% is not what a homeowner
-   * receives — lag-cost.ts puts production nearer 9.5%. Rendering 6.6% under a
-   * Maryland estimate would print a figure we have measured to be wrong.
+   * Maryland ships a WIDE number rather than a blank, because 11.7% was
+   * measured on the production path under the 90-day cutoff production
+   * actually faces. The qualifier is what stops it reading as "the engine is
+   * bad at Maryland" — it is working from records a quarter old.
    */
-  it("refuses to print a figure that does not describe production", () => {
-    expect(accuracyLine(1_951_882, "maryland")).toBeNull();
-    expect(JURISDICTION_ACCURACY.maryland.displayable).toBe(false);
+  it("ships the lagged figure with the condition it was measured under", () => {
+    const line = accuracyLine(850_000, "maryland");
+    expect(line).toContain("11.7%");
+    expect(line).toContain("reporting lag");
+    expect(JURISDICTION_ACCURACY.maryland.pct).toBe(11.7);
+  });
+
+  /** The stale figure must not come back. 6.6% was the pre-lag measurement. */
+  it("never prints the pre-lag Maryland figure", () => {
+    expect(accuracyLine(850_000, "maryland")).not.toContain("6.6%");
+  });
+
+  /** The gate itself still works for anything measured under wrong conditions. */
+  it("still refuses a figure marked undisplayable", () => {
+    const undisplayable = Object.entries(JURISDICTION_ACCURACY).filter(
+      ([, f]) => !f.displayable
+    );
+    for (const [key] of undisplayable) expect(accuracyLine(1_000_000, key)).toBeNull();
   });
 
   it("prints nothing at all rather than a pooled fallback", () => {
@@ -123,10 +138,14 @@ describe("accuracyLine", () => {
     }
   });
 
-  it("records why every undisplayable figure is withheld", () => {
+  /** Every figure, displayed or not, has to say where it came from. */
+  it("records the basis of every figure", () => {
     for (const [key, figure] of Object.entries(JURISDICTION_ACCURACY)) {
-      if (!figure.displayable) expect(figure.basis.length).toBeGreaterThan(20);
+      expect(figure.basis.length).toBeGreaterThan(20);
       expect(key).toBe(key.toLowerCase());
+      // A figure measured under an unusual condition must say so on screen,
+      // not only in the basis string a homeowner never sees.
+      if (figure.basis.includes("cutoff")) expect(figure.qualifier).toBeTruthy();
     }
   });
 });
@@ -135,8 +154,9 @@ describe("displayableAccuracy", () => {
   it("returns the figure only when it is safe to print", () => {
     expect(displayableAccuracy("dc")?.pct).toBe(4.7);
     expect(displayableAccuracy("fairfax")?.pct).toBe(7.5);
-    expect(displayableAccuracy("maryland")).toBeNull();
+    expect(displayableAccuracy("maryland")?.pct).toBe(11.7);
     expect(displayableAccuracy(null)).toBeNull();
+    expect(displayableAccuracy("arlington")).toBeNull();
   });
 });
 

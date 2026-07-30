@@ -22,7 +22,24 @@
  * and reports it beside the record-subject figure, so the two never get quietly
  * conflated again.
  *
- *   npx tsx scripts/production-path-backtest.ts [samplesPerMarket]
+ *   npx tsx scripts/production-path-backtest.ts [samplesPerMarket] [lagDays]
+ *
+ * LAG DAYS — WHY THIS ARGUMENT EXISTS
+ *
+ * At the default of 0, comps are withheld only from the sale date onward, which
+ * silently assumes the county publishes a sale the moment it closes. DC and
+ * Fairfax roughly do (~10 days). Maryland does not: its state feed runs about a
+ * quarter behind, so a homeowner asking today is valued from comps that are all
+ * at least 90 days old, and the engine extrapolates across that gap.
+ *
+ * Measuring Maryland at lag 0 therefore reports a number no Maryland visitor can
+ * receive. `scripts/lag-cost.ts` showed the size of the effect on the ENGINE
+ * path — 5.7% to 9.5% — but the engine path hands the subject its own record.
+ * This script resolves the subject from a lat/lng the way production does, so
+ * running it with a lag is the only way to get the figure the accuracy band is
+ * allowed to display.
+ *
+ *   npx tsx scripts/production-path-backtest.ts 40 90    # Maryland's reality
  *
  * WHAT IS HELD OUT. The subject's own sale is removed from the candidate pool,
  * along with anything that closed on or after it. Production does not do this —
@@ -59,6 +76,24 @@ const CANDIDATE_LIMIT = 200;
  * appears as the product failing to cover its own market.
  */
 const LOOKUP_ATTEMPTS = 3;
+
+/**
+ * Days of publishing lag to simulate. Comps are withheld for this long BEFORE
+ * the sale, on top of the usual holdout, so the engine must extrapolate exactly
+ * as it does live.
+ *
+ * The valuation date stays at the day before the sale — only the evidence moves.
+ * Moving `asOf` instead would measure a different thing entirely: an estimate
+ * made three months early, rather than an estimate made today from three-month-
+ * old records.
+ */
+const LAG_DAYS = Number(process.argv[3]) || 0;
+
+function shiftDays(iso: string, days: number): string {
+  const d = new Date(iso);
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
 
 type Provider = CompsProvider & {
   lookupSubject(location: { lat: number; lng: number }): Promise<SubjectLookup | null>;
@@ -147,8 +182,9 @@ async function main() {
       const parcel = s.id.split("@")[0];
       // Hold out the subject's own sale and anything at or after it. Production
       // would use them; measuring against them is circular.
+      const cutoff = LAG_DAYS ? shiftDays(s.soldDate, LAG_DAYS) : s.soldDate;
       const candidates = usable
-        .filter(c => c.id.split("@")[0] !== parcel && c.soldDate < s.soldDate)
+        .filter(c => c.id.split("@")[0] !== parcel && c.soldDate < cutoff)
         // Mirror the route's fetch cap, which takes the most recent.
         .sort((a, b) => (a.soldDate < b.soldDate ? 1 : -1))
         .slice(0, CANDIDATE_LIMIT);

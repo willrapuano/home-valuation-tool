@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MARKETS, resolveMarket, scopeLabel } from "./markets";
+import { allFilters, MARKETS, resolveMarket, scopeLabel } from "./markets";
 import { parseLayerDate } from "./market-pulse";
 
 describe("resolveMarket", () => {
@@ -38,7 +38,7 @@ describe("market definitions", () => {
    */
   it("only claims arm's-length where a filter actually excludes transfers", () => {
     expect(MARKETS.fairfax.armsLength).toBe(true);
-    expect(MARKETS.fairfax.filters.some(f => f.includes("SALEVAL_DESC"))).toBe(true);
+    expect(MARKETS.fairfax.qualityFilters.some(f => f.includes("SALEVAL_DESC"))).toBe(true);
 
     expect(MARKETS.dc.armsLength).toBe(false);
     expect(MARKETS.montgomery.armsLength).toBe(false);
@@ -51,10 +51,10 @@ describe("market definitions", () => {
    */
   it("restricts to dwellings wherever the layer allows it", () => {
     expect(MARKETS.dc.residentialOnly).toBe(true);
-    expect(MARKETS.dc.filters.some(f => f.includes("PROPTYPE"))).toBe(true);
+    expect(MARKETS.dc.qualityFilters.some(f => f.includes("PROPTYPE"))).toBe(true);
 
     expect(MARKETS.montgomery.residentialOnly).toBe(true);
-    expect(MARKETS.montgomery.filters.some(f => f.startsWith("LU IN"))).toBe(true);
+    expect(MARKETS.montgomery.qualityFilters.some(f => f.startsWith("LU IN"))).toBe(true);
 
     // Fairfax genuinely cannot: land use lives on a different layer.
     expect(MARKETS.fairfax.residentialOnly).toBe(false);
@@ -73,10 +73,25 @@ describe("market definitions", () => {
     }
   });
 
+  /**
+   * Regression: the benchmark's baseline dropped every filter to get an
+   * "unfiltered" figure, which for Maryland also dropped JURSCODE — comparing
+   * Montgomery's 2,715 sales against 21,059 statewide ones and calling the
+   * difference the value of the land-use filter. Scope is identity and must
+   * never sit in qualityFilters.
+   */
+  it("keeps market identity out of the quality filters", () => {
+    for (const m of Object.values(MARKETS)) {
+      expect(m.qualityFilters.some(f => f.includes("JURSCODE"))).toBe(false);
+      expect(allFilters(m)).toEqual([...m.scopeFilters, ...m.qualityFilters]);
+    }
+    expect(MARKETS.montgomery.scopeFilters).toEqual(["JURSCODE = 'MONT'"]);
+  });
+
   it("scopes every Maryland county to its own JURSCODE", () => {
     const md = ["montgomery", "prince-georges", "howard", "frederick", "anne-arundel"];
     const codes = md.map(k => {
-      const f = MARKETS[k].filters.find(x => x.startsWith("JURSCODE"));
+      const f = MARKETS[k].scopeFilters.find(x => x.startsWith("JURSCODE"));
       expect(f).toBeDefined();
       return f;
     });

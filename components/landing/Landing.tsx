@@ -5,7 +5,7 @@ import type { MarketPulse } from "@/lib/market-pulse";
 import { agent, agentFirstName } from "@/lib/agent";
 // One source for the backtest figures, shared with the results screen and the
 // report so the three can never quote different numbers at each other.
-import { ACCURACY, JURISDICTION_ACCURACY, jurisdictionLabel } from "@/lib/accuracy";
+import { JURISDICTION_ACCURACY, jurisdictionLabel } from "@/lib/accuracy";
 
 /**
  * The landing page.
@@ -142,8 +142,12 @@ function MarketPanel({ pulse }: { pulse: MarketPulse }) {
           */}
           <dt className="text-sm text-ink-muted mt-1">{pulse.scope}</dt>
         </div>
-        {/* Omitted rather than faked when the median query timed out — see
-            lib/market-pulse.ts. The counts still stand on their own. */}
+        {/*
+          Omitted rather than faked. Two reasons, both in lib/markets.ts: the
+          median query timed out, or this market's sales layer cannot restrict
+          to dwellings and an unfiltered median measured $49,000 out. The count
+          is filtered and stands on its own.
+        */}
         {pulse.medianPrice !== null && (
           <div>
             <dd className="font-serif text-4xl text-ink tnum">
@@ -165,6 +169,9 @@ function MarketPanel({ pulse }: { pulse: MarketPulse }) {
         <p className="mt-3 text-xs text-ink-faint">
           Read from {pulse.market} public records. The window ends at the newest recorded
           sale, not at today&apos;s date.
+          {pulse.medianPrice === null &&
+            " A median is not shown for this county: its sales records carry no land-use " +
+              "code, so one cannot be restricted to homes."}
         </p>
       </div>
     </aside>
@@ -267,23 +274,34 @@ function Accuracy() {
               How close it gets, measured
             </h2>
             <p className="mt-5 text-[15px] leading-relaxed text-ink-muted">
-              The engine was tested against {ACCURACY.sampleSize} homes that had actually
-              sold, selected at random across {ACCURACY.marketCount} markets. Each was valued
-              from the sales around it with its own sale price withheld, then compared against
-              what it really sold for.
+              The engine is tested against homes that had actually sold, selected at random.
+              Each is valued from the sales around it with its own sale price withheld — and
+              with the records held back as long as that county really holds them back — then
+              compared against what it truly sold for.
+            </p>
+            {/*
+              NO POOLED HEADLINE FIGURE. There used to be one — "half the
+              estimates landed within 6.1%" — and it was measured with every
+              jurisdiction's comps cut off at the sale date, which assumes
+              counties publish instantly. Maryland does not; measured under its
+              real ~3-month lag it is 11.7%, so any average including it at 6.6%
+              was optimistic. Averages across jurisdictions with different
+              publishing lags are not a quantity anyone receives. The table is
+              the claim.
+            */}
+            <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">
+              How close it gets depends on which records your county publishes and how
+              quickly, so it is stated per jurisdiction rather than averaged. Where the
+              nearby sales are too few or too dissimilar for any figure to be worth
+              printing, none is shown — and that is always the case where a jurisdiction
+              publishes no sale prices at all. Those requests go to {agentFirstName} to
+              prepare by hand.
             </p>
             <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">
-              Half the estimates landed within {ACCURACY.medianErrorPct}% of the true price.
-              Where the nearby sales are too few or too dissimilar for that to hold, no number
-              is shown at all — which happens about {100 - ACCURACY.publishRatePct}% of the
-              time, and always in the jurisdictions that publish no sale prices. Those
-              requests go to {agentFirstName} to prepare by hand.
-            </p>
-            <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">
-              This is why your estimate is shown rounded, with its band underneath. Printing{" "}
-              <span className="tnum">$1,951,882</span> on a figure that is typically{" "}
-              {ACCURACY.medianErrorPct}% out would be asserting precision we have measured
-              ourselves not to have.
+              This is also why your estimate is shown rounded, with its band underneath.
+              Printing <span className="tnum">$1,951,882</span> on a figure measured to be
+              several percent out would be asserting precision we have measured ourselves
+              not to have.
             </p>
           </div>
 
@@ -313,8 +331,18 @@ function Accuracy() {
                 */}
                 {Object.entries(JURISDICTION_ACCURACY).map(([key, figure]) => (
                   <tr key={key} className="border-b border-rule last:border-0">
-                    <td className="px-5 py-3.5 text-ink">{jurisdictionLabel(key)}</td>
-                    <td className="px-5 py-3.5 text-right tnum">
+                    <td className="px-5 py-3.5">
+                      <span className="text-ink">{jurisdictionLabel(key)}</span>
+                      {/* The condition the figure was measured under, where it
+                          differs — otherwise Maryland reads as the engine being
+                          worse rather than the records being older. */}
+                      {figure.qualifier && (
+                        <span className="block text-[13px] text-ink-faint mt-0.5">
+                          {figure.qualifier}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3.5 text-right tnum align-top">
                       {figure.displayable ? (
                         <span className="text-ink">{figure.pct}%</span>
                       ) : (

@@ -36,8 +36,23 @@ export interface MarketDefinition {
   dateLiteral: (d: Date) => string;
   /** Rows below this price are transfers, not sales. */
   minPrice: number;
-  /** Extra WHERE terms — jurisdiction scope, arm's-length filters. */
-  filters: string[];
+  /**
+   * WHERE terms that define WHICH market this is — e.g. Maryland's JURSCODE.
+   * Always applied; without them a "Montgomery" query returns the whole state.
+   *
+   * Kept apart from `qualityFilters` because the two answer different
+   * questions, and conflating them broke the benchmark: dropping "all filters"
+   * to get a baseline also dropped the county, so Montgomery's 2,715 sales were
+   * being compared against 21,059 statewide ones. Scope is identity; quality is
+   * the thing under test.
+   */
+  scopeFilters: string[];
+  /**
+   * WHERE terms that exclude records we do not want counted — non-arm's-length
+   * transfers, non-residential parcels. These are what
+   * `scripts/market-benchmark.ts` measures the effect of.
+   */
+  qualityFilters: string[];
   /**
    * Whether `filters` actually excludes non-arm's-length transfers.
    *
@@ -60,9 +75,21 @@ export interface MarketDefinition {
    * panel at all.
    *
    * Fairfax cannot do this: its sales layer carries no land-use field (that
-   * lives on the assessed-values layer, which a count query cannot join to), so
-   * its figures are honestly labelled "property sales" rather than "home
-   * sales".
+   * lives on the assessed-values layer, which a count query cannot join to).
+   *
+   * MEASURED, not assumed. `scripts/market-benchmark.ts` does the PIN join
+   * offline, which a pageview cannot afford. Fairfax, 25 April – 24 July 2026:
+   * 4,077 sales with a median of $801,005; restricted to dwellings, 3,587 sales
+   * with a median of $850,000. 12.0% of "sales" are not dwellings and they are
+   * worth $48,995 — within a thousand dollars of the correction DC owed, in the
+   * opposite direction (DC's contaminants were hotels and offices, dearer than
+   * the housing stock; Fairfax's are vacant land and small commercial, cheaper).
+   *
+   * A median that is $49,000 light is a number an agent checks against what they
+   * already know and loses confidence over. Relabelling it "property sales" is
+   * true but does not help — nobody reads the label that carefully. So markets
+   * that cannot filter show their COUNT and withhold their MEDIAN; see
+   * `medianDisplayable`.
    */
   residentialOnly: boolean;
 }
@@ -72,6 +99,31 @@ export interface MarketDefinition {
  * were actually applied rather than written by hand per market, so a filter
  * that gets removed cannot leave a claim behind.
  */
+/**
+ * May this market's median be printed?
+ *
+ * Only where the query can restrict to dwellings. An unfiltered median is a
+ * measured $49,000 out in Fairfax and $50,000 out in DC, and it is the one
+ * figure on the page an agent verifies from memory.
+ *
+ * This is the same rule `lib/accuracy.ts` applies to error percentages: a
+ * number is either measured under the conditions it claims, or it is withheld.
+ * The count is unaffected — it is honestly filtered and is the stronger trust
+ * signal anyway.
+ *
+ * FLIPPING THIS BACK requires an ingested PIN -> land-use table so the join can
+ * happen offline once rather than per pageview. That is what DATABASE_URL
+ * unlocks; `scripts/market-benchmark.ts` already proves the join works.
+ */
+export function medianDisplayable(m: MarketDefinition): boolean {
+  return m.residentialOnly;
+}
+
+/** Every WHERE term for this market, scope and quality together. */
+export function allFilters(m: MarketDefinition): string[] {
+  return [...m.scopeFilters, ...m.qualityFilters];
+}
+
 export function scopeLabel(m: MarketDefinition): string {
   const kind = m.residentialOnly ? "home sales" : "property sales";
   return m.armsLength ? `Arm’s-length ${kind} recorded` : `${kind[0].toUpperCase()}${kind.slice(1)} recorded`;
@@ -90,8 +142,8 @@ function marylandCounty(label: string, jurscode: string): MarketDefinition {
     dateField: "TRADATE",
     dateLiteral: mdDate,
     minPrice: 50_000,
-    filters: [
-      `JURSCODE = '${jurscode}'`,
+    scopeFilters: [`JURSCODE = '${jurscode}'`],
+    qualityFilters: [
       // The same land-use codes the Maryland provider treats as dwellings.
       // Measured on Montgomery: 2,822 sales unfiltered, 2,715 residential.
       //
@@ -117,7 +169,8 @@ export const MARKETS: Record<string, MarketDefinition> = {
     dateField: "SALEDT",
     dateLiteral: esriDate,
     minPrice: 50_000,
-    filters: [
+    scopeFilters: [],
+    qualityFilters: [
       // Public record includes family transfers and nominal $1 conveyances,
       // which are not evidence of market value. Filtering in SQL keeps this to
       // a count query rather than a several-thousand-row pull.
@@ -139,7 +192,8 @@ export const MARKETS: Record<string, MarketDefinition> = {
     dateField: "SALEDATE",
     dateLiteral: esriDate,
     minPrice: 50_000,
-    filters: [
+    scopeFilters: [],
+    qualityFilters: [
       // Row, detached and semi-detached — the three forms `propertyTypeFromProptype`
       // in the DC provider maps to a house. Condominiums are deliberately out:
       // "median home price" and "median condo price" are different numbers and

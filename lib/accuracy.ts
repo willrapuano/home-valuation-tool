@@ -18,33 +18,42 @@
  * NO PERCENTAGE IS DISPLAYED FOR A JURISDICTION UNLESS IT WAS MEASURED ON THE
  * PRODUCTION PATH, UNDER THE CONDITIONS PRODUCTION ACTUALLY FACES.
  *
- * Both halves matter, and Maryland fails the second one.
+ * Both halves matter, and Maryland caught the second one out.
  *
  * `scripts/production-path-backtest.ts` values each holdout from a lat/lng, the
- * way a visitor arrives, and reports 6.6% for Maryland. But every backtest here
- * draws its subjects from the SAME lagged pool as its comps, so subject and
- * comps sit behind Maryland's publishing lag together and the forward
- * extrapolation cancels out. Production does not get that: the newest Maryland
- * sale available is about a quarter old, so a homeowner asking today is valued
- * from comps that are all stale.
+ * way a visitor arrives, and at its default settings reported 6.6% for
+ * Maryland. But every backtest here draws its subjects from the SAME lagged
+ * pool as its comps, so subject and comps sit behind Maryland's publishing lag
+ * together and the forward extrapolation cancels out. Production does not get
+ * that: the newest Maryland sale available is about a quarter old, so a
+ * homeowner asking today is valued from comps that are all stale.
  *
- * `scripts/lag-cost.ts` measured the difference directly by cutting comps off
- * 90 days early:
+ * `scripts/lag-cost.ts` measured the difference on the ENGINE path by cutting
+ * comps off 90 days early — 5.7% becomes 9.5%, and coverage drops 20 points.
+ * That script was audited for the obvious way to get this wrong: it refits
+ * `annualAppreciation` on the cut-off candidate set at every iteration rather
+ * than reusing a full-data fit, so the rate does not peek at the future.
  *
- *     cutoff       ALL   maryland    dc   fairfax   valued
- *     same week   5.3%     5.7%     5.9%   5.1%      93%
- *     90 days     7.0%     9.5%     7.0%   5.3%      73%
+ * But the engine path hands the subject its own record. Production resolves it
+ * from a lat/lng, and for Maryland that gap is worth another +1.7pp. So the
+ * measurement that governs the display is the PRODUCTION path run under the
+ * lag — `production-path-backtest.ts 25 90`:
  *
- * Maryland lives at the 90-day row in production. Its real error is nearer
- * 9.5% than 6.6%, and its coverage is 20 points lower than the backtest
- * suggests. DC and Fairfax publish within about ten days, so their backtest
- * conditions match production and their figures stand.
+ *     jurisdiction   paired   record subj   live subj   published   MdAPE shown
+ *     dc                 37          5.1%        4.5%         90%          4.5%
+ *     maryland           44          8.6%       10.3%         67%         11.7%
  *
- * Rendering 6.6% under every Maryland estimate would therefore be printing a
- * number we have measured to be wrong, as marketing. Maryland shows no
- * percentage until `production-path-backtest.ts` is re-run against a
- * lag-simulated comp set. It shows the data's recency instead, which is both
- * true and more useful.
+ * MARYLAND IS 11.7%, not 6.6% and not 9.5%. That is the number displayed, and
+ * it is displayed BECAUSE it is honest: a wide measured band beats a blank, and
+ * it is the figure a Bethesda homeowner actually receives.
+ *
+ * DC at the same 90-day cutoff shows 4.5% against 4.7% unlagged — statistically
+ * flat, which is the expected control result for a jurisdiction that publishes
+ * within about ten days. DC's and Fairfax's figures stand as measured.
+ *
+ * WHEN A FIGURE IS STILL WITHHELD, the UI shows the data's recency instead —
+ * see `recencyLine`. That path remains live for any jurisdiction added without
+ * a measurement.
  */
 
 /** Pooled figure across every measured market. See production-path-backtest.ts. */
@@ -68,6 +77,16 @@ export interface AccuracyFigure {
   displayable: boolean;
   /** Why, in one line, for whoever changes this next. */
   basis: string;
+  /**
+   * Appended to the displayed sentence where the figure was measured under a
+   * condition a reader should know about.
+   *
+   * Maryland's 11.7% is not the engine being worse at Maryland houses; it is
+   * the engine working from records a quarter old. Saying so turns a
+   * discouraging number into an explained one, and it is the same fact the
+   * recency line states underneath.
+   */
+  qualifier?: string;
 }
 
 /**
@@ -89,10 +108,11 @@ export const JURISDICTION_ACCURACY: Record<string, AccuracyFigure> = {
     basis: "production-path backtest; Fairfax publishes within ~10 days and rests on assessed value, which does not go stale",
   },
   maryland: {
-    pct: 6.6,
-    displayable: false,
+    pct: 11.7,
+    displayable: true,
     basis:
-      "measured on a pool as lagged as its comps, so the extrapolation cancels; lag-cost.ts puts production nearer 9.5%. Re-run production-path-backtest.ts with a 90-day comp cutoff before displaying anything",
+      "production-path backtest run with a 90-day comp cutoff (`production-path-backtest.ts 25 90`), which is the publishing lag Maryland actually has. n=44 paired across Rockville, Bethesda, Frederick and Columbia; 67% published",
+    qualifier: "measured under Maryland's ~3-month reporting lag",
   },
 };
 
@@ -179,9 +199,11 @@ export function accuracyLine(estimate: number, jurisdiction?: string | null): st
   const figure = displayableAccuracy(jurisdiction);
   if (!figure) return null;
   const band = roundToSigFigs((estimate * figure.pct) / 100, 2);
+  const qualifier = figure.qualifier ? `, ${figure.qualifier}` : "";
   return (
     `give or take $${band.toLocaleString("en-US")} — half of estimates in ` +
-    `${jurisdictionLabel(jurisdiction)} land within ${figure.pct}% of the sale price`
+    `${jurisdictionLabel(jurisdiction)} land within ${figure.pct}% of the sale price` +
+    qualifier
   );
 }
 

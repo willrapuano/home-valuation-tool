@@ -61,6 +61,44 @@
  * support — is not borne out. What remains true is that the same word means
  * 4.3% in DC and 5.7% in Maryland, which is a real if modest inconsistency.
  *
+ * ── DOES THE APPRECIATION RATE PEEK AT THE FUTURE? AUDITED: NO. ──────────
+ *
+ * The obvious way to get this wrong is to fit `annualAppreciation` on the full
+ * data and then reuse that fit at every cutoff. The rate would then carry
+ * information from sales the engine is not supposed to have seen, and every
+ * lagged row would be flattered — 9.5% would itself be optimistic.
+ *
+ * It does not happen here. `valueFromComps` is called with only `asOf` and
+ * `maxAssessmentRatioDeviation` as overrides — no `market` — so `calibrate.ts`
+ * runs `calibrateMarket(candidates, ...)` against the CUT-OFF candidate set on
+ * every iteration and refits the rate from scratch. See the guard in
+ * `lib/comps/index.ts`: calibration is skipped only when `calibrate === false`
+ * or an explicit `market` override is supplied, and neither is passed here.
+ *
+ * The candidate pool is fetched over 24 months, which does include sales after
+ * the subject's, but `cands` filters `c.soldDate < cutoff` before it reaches the
+ * engine.
+ *
+ * ONE LEAK REMAINS AND IS SHARED BY EVERY BACKTEST HERE: the subject's
+ * `assessedValue` is the CURRENT assessment, which for a holdout may already
+ * reflect the sale being predicted. It is identical at every cutoff, so the
+ * DIFFERENCE between rows — the cost of the lag — is clean even where the
+ * absolute level is optimistic.
+ *
+ * ── WHAT THIS IS NOT ─────────────────────────────────────────────────────
+ *
+ * The ENGINE path, not the product path. The subject here is built from the
+ * holdout's own sales record; production resolves it from a lat/lng through
+ * `lookupSubject`, and that gap is worth up to 1.8pp (Fairfax 5.4% -> 7.2%).
+ * So 9.5% is "engine error under a 90-day lag", and it is NOT the figure the
+ * accuracy band may display.
+ *
+ * For that, run the production-path script with a lag:
+ *
+ *   npx tsx scripts/production-path-backtest.ts 25 90
+ *
+ * which applies the same cutoff to the same pipeline a homeowner goes through.
+ *
  * No free fresher Maryland source exists. Checked: both iMAP layers (identical
  * lag), every service in iMAP's PlanningCadastre catalogue, MDP's own
  * mdpgis.mdp.state.md.us (hosts no sales), Montgomery County open data (tax

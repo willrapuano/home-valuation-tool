@@ -135,6 +135,15 @@ Coverage varies more by market than by jurisdiction — Annandale publishes 100%
 Bethesda 44% — so the per-market table in `docs/jurisdiction-data-sources.md`
 is the one to read before trusting an average.*
 
+> ⚠️ **The Maryland row above is measured at zero publishing lag and is
+> optimistic.** It withholds comps only from the sale date onward, which assumes
+> the county publishes a sale the moment it closes. Maryland's state feed runs
+> about a quarter behind. Re-run under that lag it is **11.7%**, not 6.9% — see
+> [Displayed precision](#displayed-precision) below, and run
+> `npx tsx scripts/production-path-backtest.ts 25 90`. The figure the UI shows
+> is the lagged one; this table is kept because it is the like-for-like
+> comparison of the engine path against the product path.
+
 The engine column, on larger per-source samples, is DC 4.5% / Fairfax 5.3% /
 Maryland 8.7%. Those describe the scoring, not what a homeowner receives — see
 `docs/jurisdiction-data-sources.md`.
@@ -256,27 +265,48 @@ in Washington, DC land within 4.7% of the sale price`).
 
 #### No percentage without a production-path measurement
 
-`accuracyLine()` returns **null** for any jurisdiction whose measurement does
-not describe what a visitor actually gets, and the UI shows the data's recency
+`accuracyLine()` returns **null** for any jurisdiction whose measurement does not
+describe what a visitor actually gets, and the UI shows the data's recency
 instead. There is no hedged middle state: a figure is either safe to print or it
-is withheld.
+is withheld, and every entry carries a `basis` string saying where it came from.
 
-**Maryland is currently withheld.** Every backtest here draws its subjects from
-the same lagged pool as its comps, so subject and comps sit behind Maryland's
-publishing lag together and the forward extrapolation cancels. Production does
-not get that. `scripts/lag-cost.ts` measured the difference by cutting comps off
-90 days early:
+**The rule caught Maryland.** Every backtest here draws its subjects from the
+same lagged pool as its comps, so subject and comps sit behind Maryland's
+publishing lag together and the forward extrapolation cancels. That reported
+6.6%. `scripts/production-path-backtest.ts` now takes a lag argument, and run the
+way Maryland actually works:
 
-| cutoff | all | maryland | dc | fairfax | valued |
+```bash
+npx tsx scripts/production-path-backtest.ts 25 90
+```
+
+| jurisdiction | paired | record subj | live subj | published | **MdAPE shown** |
 |---|---|---|---|---|---|
-| same week | 5.3% | 5.7% | 5.9% | 5.1% | 93% |
-| 90 days | 7.0% | **9.5%** | 7.0% | 5.3% | 73% |
+| dc | 37 | 5.1% | 4.5% | 90% | **4.5%** |
+| maryland | 44 | 8.6% | 10.3% | 67% | **11.7%** |
 
-Maryland lives at the 90-day row in production: nearer 9.5% than the 6.6% the
-standard backtest reports, and 20 points less coverage. DC and Fairfax publish
-within ~10 days, so their backtest conditions match production and their figures
-stand. Maryland's percentage returns when `production-path-backtest.ts` is re-run
-against a lag-simulated comp set.
+**Maryland is 11.7%, not 6.6%.** It ships — a wide measured band beats a blank —
+carrying the condition it was measured under: *"half of estimates in Maryland
+land within 11.7% of the sale price, measured under Maryland's ~3-month
+reporting lag."* Without that qualifier the number reads as the engine being bad
+at Maryland houses rather than working from records a quarter old.
+
+DC at the same 90-day cutoff shows 4.5% against 4.7% unlagged — flat, which is
+the expected control for a jurisdiction publishing within ~10 days.
+
+**There is no pooled headline figure any more.** The old "6.1% across eight
+markets" averaged jurisdictions with different publishing lags, and included
+Maryland at its optimistic 6.6%. An average across counties that publish at
+different speeds is not a quantity anyone receives. The per-jurisdiction table
+is the claim.
+
+**`scripts/lag-cost.ts` was audited for the obvious leak** and is clean: it calls
+`valueFromComps` with only `asOf` and `maxAssessmentRatioDeviation`, never a
+`market` override, so `calibrateMarket` refits `annualAppreciation` on the
+cut-off candidate set every iteration. The rate does not peek at the future. One
+leak remains and is shared by every backtest here — the subject's `assessedValue`
+is the current assessment — but it is identical at every cutoff, so the
+*difference* between rows is clean.
 
 `JURISDICTION_ACCURACY` is keyed by **provider slug**, not market key. Every
 Maryland county is served by the one Maryland provider and reports `maryland`,
@@ -285,42 +315,63 @@ that were never measured. A test asserts that cross-product stays empty.
 
 #### The Maryland lag is structural, not an ingest problem
 
-Checked and documented in `scripts/lag-cost.ts`: both iMAP layers carry the
+Checked and recorded in `scripts/lag-cost.ts`: both iMAP layers carry the
 identical lag, as does every service in iMAP's PlanningCadastre catalogue; MDP's
 own `mdpgis.mdp.state.md.us` hosts no sales; Montgomery County open data
-publishes tax rolls only; and SDAT Real Property Search returns 403 to automated
-requests. There is no free fresher Maryland source. Fresh Maryland sales are
-therefore another thing a TitlePro247 / MDLandRec subscription would unlock, on
-top of Bethesda's deed types.
+publishes tax rolls only; SDAT Real Property Search returns 403 to automated
+requests. There is no free fresher Maryland source, so fresh Maryland sales are
+another thing a TitlePro247 / MDLandRec subscription would unlock.
 
-The engine already time-adjusts each comp forward by its age
-(`adjustComp`, `annualAppreciation`), so the point estimate is not naively
-comparing July to April — but the appreciation rate is fitted on sales that also
-stop in April, and the lag-cost table above is what that extrapolation costs in
-practice. An HPI-indexed market-conditions adjustment would replace the locally
-fitted rate with a published index; the measured cost is dominated by comp
-staleness itself rather than by the rate being wrong, so that is an improvement
-rather than the fix.
+The engine already time-adjusts each comp forward by its age (`adjustComp`,
+`annualAppreciation`), so the point estimate is not naively comparing July to
+April — but the rate is fitted on sales that also stop in April, and 11.7% is
+what that extrapolation costs in practice. An HPI-indexed market-conditions
+adjustment would replace the local fit with a published index.
 
 Every screen that shows comps — results, shareable report, and the mailed-CMA
-screen an agent approves letters from — now prints *"Based on sales recorded
-through 30 April 2026 — this jurisdiction publishes sales about 3 months behind,
-so the market has moved since."* The date is derived from the newest comp
-actually shown, not from a constant.
+screen an agent approves letters from — prints *"Based on sales recorded through
+30 April 2026 — this jurisdiction publishes sales about 3 months behind."* The
+date comes from the newest comp actually shown.
 
-#### Hero medians are filtered to dwellings where the layer allows it
+#### Hero medians: filtered, or withheld
 
 `scripts/market-benchmark.ts` prints each market's quartiles filtered and
-unfiltered. Measured on DC, 24 April – 23 July 2026: 1,459 "sales" with a median
-of **$920,000** unfiltered, against 1,115 sales and **$870,000** restricted to
-single-family dwellings. The $50,000 difference was hotels, offices, warehouses,
-parking lots, religious buildings, garages and vacant land inside a figure
-labelled "median sale price".
+unfiltered, and does an **offline PIN join** for Fairfax that a pageview cannot
+afford. Measured over each market's own 90-day window:
 
-Fairfax cannot do this — its sales layer carries no land-use field — so its panel
-honestly says "property sales" rather than "home sales". `scopeLabel()` derives
-that wording from the filters that actually ran, so a filter that gets removed
-cannot leave a claim behind.
+| market | as queried | restricted to dwellings | gap |
+|---|---|---|---|
+| Washington, DC | $920,000 (n=1,459) | **$870,000** (n=1,115) | −$50,000 |
+| Fairfax County | $801,005 (n=4,077) | **$850,000** (n=3,587) | +$48,995 |
+
+Fairfax owed almost exactly the correction DC did, in the opposite direction —
+DC's contaminants were hotels and offices, dearer than the housing stock;
+Fairfax's are vacant land and small commercial, cheaper. 12.0% of Fairfax
+"sales" are not dwellings.
+
+DC filters on `PROPTYPE` and Maryland on `LU`. **Fairfax cannot**, so it now
+shows its count and *withholds its median* — the same rule as the accuracy
+percentages, since a median $49,000 light is the one figure an agent verifies
+from memory. Restoring it needs an ingested PIN → land-use table so the join
+happens once offline rather than per pageview; `market-benchmark.ts` already
+proves the join works, and `DATABASE_URL` is what unlocks it.
+
+Maryland's `LU` filter is also a large **speedup** on the sales layer — the
+median at offset 1,350 measured 72.1s unfiltered against 15.0s with `LU IN` —
+which is the opposite of the parcel layer, where the same filter costs 10.9s
+against 1.0s.
+
+`scopeLabel()` derives the panel's wording from the filters that actually ran, so
+a removed filter cannot leave a claim behind. `scopeFilters` (market identity,
+e.g. `JURSCODE`) are kept separate from `qualityFilters` (arm's-length,
+residential): the benchmark's baseline drops the latter only. Conflating them
+compared Montgomery's 2,715 sales against 21,059 statewide ones.
+
+**Comparing a median against Bright:** match the window. These windows end at the
+newest *recorded* sale, so Montgomery's $654,300 is a January–April window and
+belongs beside spring closed medians, not July's. Expect a few points of drift
+from recorded-vs-settled dates and from Bright seeing only MLS-listed stock.
+Close is a pass; exact would be suspicious.
 
 `low`/`high` from the engine are **not** a confidence interval and are no longer
 labelled as one. They come out of `reconcile()` as the weighted dispersion of
