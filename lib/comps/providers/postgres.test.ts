@@ -168,7 +168,7 @@ describe("jurisdiction allow-list", () => {
 
     const { sql, params } = captured[0];
     expect(sql).toContain("jurisdiction = ANY(");
-    expect(params).toContainEqual(["dc", "fairfax", "maryland", "arlington", "loudoun"]);
+    expect(params).toContainEqual(["dc", "fairfax", "maryland"]);
   });
 
   it("restricts the subject lookup too", async () => {
@@ -178,7 +178,7 @@ describe("jurisdiction allow-list", () => {
 
     const { sql, params } = captured[0];
     expect(sql).toContain("jurisdiction = ANY(");
-    expect(params).toContainEqual(["dc", "fairfax", "maryland", "arlington", "loudoun"]);
+    expect(params).toContainEqual(["dc", "fairfax", "maryland"]);
   });
 
   it("serves only what the list names", async () => {
@@ -188,8 +188,10 @@ describe("jurisdiction allow-list", () => {
     await new PostgresProvider().fetchCandidates(subject, opts);
 
     const allowed = captured[0].params.find(Array.isArray) as string[];
-    expect(allowed).not.toContain("titlepro247");
-    expect(allowed).not.toContain("scratch");
+    // Commercially licensed sources stay unserved until the licence is read.
+    for (const j of ["arlington", "loudoun", "alexandria", "titlepro247"]) {
+      expect(allowed).not.toContain(j);
+    }
   });
 
   it("publishes a source only when explicitly asked", async () => {

@@ -105,11 +105,37 @@ Filtering this way keeps the sales the engine was always going to get right, so
 
 The honest statement: Bethesda's accuracy on genuine arm's-length sales is
 somewhere between 8.2% and 18.7%, and public Maryland data cannot narrow it.
-DC can be measured properly because DC publishes the qualified flag. That is a
-second, independent reason to want deed-type data — beyond the coverage
-argument for Arlington and Loudoun.
 
 Do not "fix" a market's numbers by filtering its holdout.
+
+### Maryland is the only source that cannot be measured honestly
+
+An earlier version of this file said DC was the only one that could. That was
+wrong, and it mattered — it was used as an argument for buying deed-type data.
+
+| source | arm's-length flag | field |
+|---|---|---|
+| Washington, DC | **yes** | qualified flag on each sale |
+| Fairfax County | **yes** | `SALEVAL_DESC` — already filtered on |
+| Maryland | **no** | only `DR1LIBER`/`DR1FOLIO`, deed-book pointers into a separate land-records system |
+
+Fairfax publishes the assessor's own validity code with a detailed vocabulary
+("Foreclosure - invalid sale price", "Duress (liquidation, forced sale, etc.)",
+"Atypical financing", …) and `FairfaxOptions.requireValidSale` has been
+filtering comps on it all along. Nothing was using it to filter the HOLDOUT.
+
+That filter is independent of the engine's inputs, so unlike Bethesda's
+sale/assessment ratio it is **not circular** — and it moves the number:
+
+| Fairfax holdout set | n | MdAPE | off>20% |
+|---|---|---|---|
+| all sales | 64 | 8.1% | 17% |
+| assessor-valid only | 63 | **5.1%** | 11% |
+
+So Fairfax's real accuracy on market transactions is about **5.1%**, and the
+7.5% quoted for it above is measured partly against foreclosures and forced
+sales. Maryland alone is stuck with a bracket, because its parcel data carries
+deed-book references rather than a deed type.
 
 ### Coverage varies more by market than by jurisdiction
 

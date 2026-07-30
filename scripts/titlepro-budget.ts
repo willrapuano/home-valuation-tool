@@ -17,10 +17,18 @@
  * `maxOwnershipYears: 1` returns only properties that sold within the year —
  * which is exactly the comp set, and nothing else.
  *
- * This estimates the volume BEFORE any budget is spent, from public parcel
- * counts and a turnover rate measured on a county we already have full sales
- * data for. Check it against `getCount()` in velocity-connectors, which asks
- * TitlePro247 for a count without placing an order, before committing.
+ * ⚠️ THIS SCRIPT NEVER CONTACTS TITLEPRO247, AND MUST NOT.
+ *
+ * It reads PUBLIC county GIS parcel counts only — Arlington, Loudoun,
+ * Alexandria, Fairfax. Every number below is arithmetic on those.
+ *
+ * FARM LIST ORDERS COST REAL MONEY, PER RECORD. A measured order: 142 items
+ * for $172.50, i.e. about $1.21 each. Placing one is a purchase, not a query,
+ * and nothing in this repository should ever place one. The credentials and
+ * the cost ceiling live in velocity-connectors deliberately; keep them there.
+ *
+ * The point of this script is to make the size of that purchase visible
+ * BEFORE anyone commits to it.
  */
 
 // This file has no imports, so without an explicit export TypeScript treats it
@@ -84,8 +92,18 @@ const FAIRFAX_SALES =
 const FAIRFAX_PARCELS =
   "https://www.fairfaxcounty.gov/mercator/rest/services/GIS/ParcelPlusAssessedValues/MapServer/0/query";
 
-/** The licensed ceiling. */
+/** The licensed ceiling on records per month. */
 const MONTHLY_CAP = 10_000;
+/**
+ * Measured unit cost: an order of 142 items billed $172.50.
+ *
+ * THIS IS THE CONSTRAINT, NOT THE CAP. An earlier version of this script
+ * reported only "% of the monthly cap", which reads as though the quota were
+ * the limiting factor and the records were free. They are not. At this price
+ * the Northern Virginia backfill is a five-figure purchase, and that changes
+ * the decision rather than merely scheduling it.
+ */
+const COST_PER_RECORD = 172.50 / 142;
 
 const MONTHS = Number(process.argv[2]) || 12;
 
@@ -127,7 +145,7 @@ async function main() {
 
   console.log(
     `  ${"county".padEnd(12)}${"parcels".padStart(10)}${"sales/yr".padStart(10)}` +
-      `${`${MONTHS}mo pull`.padStart(11)}${"% of cap".padStart(10)}${"naive tile".padStart(12)}`
+      `${`${MONTHS}mo pull`.padStart(11)}${"% of cap".padStart(10)}${"COST".padStart(12)}`
   );
   console.log("  " + "─".repeat(65));
 
@@ -142,7 +160,7 @@ async function main() {
     console.log(
       `  ${c.name.padEnd(12)}${parcels.toLocaleString().padStart(10)}${perYear.toLocaleString().padStart(10)}` +
         `${pull.toLocaleString().padStart(11)}${`${((pull / MONTHLY_CAP) * 100).toFixed(0)}%`.padStart(10)}` +
-        `${parcels.toLocaleString().padStart(12)}`
+        `${`$${Math.round(pull * COST_PER_RECORD).toLocaleString()}`.padStart(12)}`
     );
   }
 
@@ -151,7 +169,7 @@ async function main() {
   console.log(
     `  ${"TOTAL".padEnd(12)}${"".padStart(10)}${"".padStart(10)}` +
       `${backfill.toLocaleString().padStart(11)}${`${((backfill / MONTHLY_CAP) * 100).toFixed(0)}%`.padStart(10)}` +
-      `${naive.toLocaleString().padStart(12)}`
+      `${`$${Math.round(backfill * COST_PER_RECORD).toLocaleString()}`.padStart(12)}`
   );
 
   console.log(`\n${"═".repeat(70)}`);
@@ -174,10 +192,13 @@ async function main() {
   }
 
   console.log(
-    `\n  STEADY STATE IS THE POINT: once backfilled, only new sales are pulled —\n` +
-      `  about ${steady.toLocaleString()} per month, ` +
-      `${((steady / MONTHLY_CAP) * 100).toFixed(0)}% of the cap. The budget is a\n` +
-      `  one-time problem, not an ongoing one.\n\n` +
+    `\n  COST, NOT QUOTA, IS THE CONSTRAINT. At $${COST_PER_RECORD.toFixed(2)} a record ` +
+      `(measured: 142 items\n  for $172.50) the backfill above is ` +
+      `$${Math.round(backfill * COST_PER_RECORD).toLocaleString()}, and steady state is ` +
+      `$${Math.round(steady * COST_PER_RECORD).toLocaleString()} a month\n  ` +
+      `(${steady.toLocaleString()} records, ${((steady / MONTHLY_CAP) * 100).toFixed(0)}% of the cap).\n\n` +
+      `  Weigh that against what it buys: Arlington, Loudoun and Alexandria are\n` +
+      `  currently offered a CMA rather than a number, which is a working funnel.\n\n` +
       `  AND USE maxOwnershipYears. Without it a farm search returns every current\n` +
       `  owner in the radius — ${naive.toLocaleString()} parcels across these counties, ` +
       `${(naive / MONTHLY_CAP).toFixed(0)}x the\n` +
