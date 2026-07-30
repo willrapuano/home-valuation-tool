@@ -22,7 +22,24 @@
  * and reports it beside the record-subject figure, so the two never get quietly
  * conflated again.
  *
- *   npx tsx scripts/production-path-backtest.ts [samplesPerMarket]
+ *   npx tsx scripts/production-path-backtest.ts [samplesPerMarket] [lagDays]
+ *
+ * LAG DAYS — WHY THIS ARGUMENT EXISTS
+ *
+ * At the default of 0, comps are withheld only from the sale date onward, which
+ * silently assumes the county publishes a sale the moment it closes. DC and
+ * Fairfax roughly do (~10 days). Maryland does not: its state feed runs about a
+ * quarter behind, so a homeowner asking today is valued from comps that are all
+ * at least 90 days old, and the engine extrapolates across that gap.
+ *
+ * Measuring Maryland at lag 0 therefore reports a number no Maryland visitor can
+ * receive. `scripts/lag-cost.ts` showed the size of the effect on the ENGINE
+ * path — 5.7% to 9.5% — but the engine path hands the subject its own record.
+ * This script resolves the subject from a lat/lng the way production does, so
+ * running it with a lag is the only way to get the figure the accuracy band is
+ * allowed to display.
+ *
+ *   npx tsx scripts/production-path-backtest.ts 40 90    # Maryland's reality
  *
  * WHAT IS HELD OUT. The subject's own sale is removed from the candidate pool,
  * along with anything that closed on or after it. Production does not do this —
@@ -59,6 +76,35 @@ const CANDIDATE_LIMIT = 200;
  * appears as the product failing to cover its own market.
  */
 const LOOKUP_ATTEMPTS = 3;
+
+/**
+ * Attempts at the bulk pool fetch, with exponential backoff between them.
+ *
+ * Not production behaviour and not meant to be — production never issues a
+ * 2,000-record query. This exists because a single transient failure here
+ * silently removes a whole market from the results, which is how Rockville came
+ * to be reported as a coverage hole it is not.
+ */
+const POOL_ATTEMPTS = 3;
+const POOL_BACKOFF_MS = 5_000;
+
+/**
+ * Days of publishing lag to simulate. Comps are withheld for this long BEFORE
+ * the sale, on top of the usual holdout, so the engine must extrapolate exactly
+ * as it does live.
+ *
+ * The valuation date stays at the day before the sale — only the evidence moves.
+ * Moving `asOf` instead would measure a different thing entirely: an estimate
+ * made three months early, rather than an estimate made today from three-month-
+ * old records.
+ */
+const LAG_DAYS = Number(process.argv[3]) || 0;
+
+function shiftDays(iso: string, days: number): string {
+  const d = new Date(iso);
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
 
 type Provider = CompsProvider & {
   lookupSubject(location: { lat: number; lng: number }): Promise<SubjectLookup | null>;
@@ -118,21 +164,84 @@ interface Row {
   exact: boolean;
 }
 
+/**
+ * Why a market produced nothing.
+ *
+ * A market that contributes zero rows used to vanish: the pool fetch printed to
+ * stderr and moved on, subjects short of comps were skipped by a bare
+ * `continue`, and the summary omitted any jurisdiction with no rows. A run could
+ * therefore report "dc" and "maryland" and simply not mention that Fairfax —
+ * the flagship county — had been sampled and yielded nothing. Silence reading
+ * as absence is this codebase's signature failure; it is what let DC value the
+ * wrong parcel for weeks.
+ */
+interface MarketOutcome {
+  jurisdiction: string;
+  market: string;
+  pool: number;
+  usable: number;
+  testable: number;
+  sampled: number;
+  rows: number;
+  /** Set when the market could not be sampled at all. */
+  failure?: string;
+  /** Subjects dropped because too few comps survived the holdout and lag. */
+  tooFewComps: number;
+}
+
 async function main() {
   const rows: Row[] = [];
+  const outcomes: MarketOutcome[] = [];
   let attempted = 0;
 
   for (const m of MARKETS) {
-    let pool: ComparableSale[];
-    try {
-      pool = await m.provider().fetchCandidates(
-        { location: { lat: m.lat, lng: m.lng }, propertyType: "single_family" },
-        { radiusMiles: 2.5, lookbackMonths: LOOKBACK_MONTHS, limit: 2000 }
-      );
-    } catch (err) {
-      console.error(`  ${m.jurisdiction}/${m.name}: pool fetch failed — ${(err as Error)?.message}`);
-      continue;
+    const outcome: MarketOutcome = {
+      jurisdiction: m.jurisdiction,
+      market: m.name,
+      pool: 0, usable: 0, testable: 0, sampled: 0, rows: 0, tooFewComps: 0,
+    };
+    outcomes.push(outcome);
+
+    /*
+     * RETRIED WITH BACKOFF, AND NAMED WHEN IT STILL FAILS.
+     *
+     * The pool fetch is bulk-shaped — 2,000 records over 2.5 miles — and this
+     * script issues one per market back to back. `maryland/Rockville` failed it
+     * in two consecutive runs, which read as "Rockville is dark" and was
+     * reported as a coverage caveat. It was not: pushing the same coordinates
+     * through the POINT-shaped production path afterwards valued them fine.
+     * The harness was hitting a service it had just finished hammering.
+     *
+     * A single attempt turns transient contention into a permanent-looking
+     * hole in the coverage map, so it retries — and if it still fails, the
+     * failure is recorded on the outcome and printed in the summary rather
+     * than left in scrollback.
+     */
+    let pool: ComparableSale[] | null = null;
+    for (let attempt = 1; attempt <= POOL_ATTEMPTS; attempt++) {
+      try {
+        pool = await m.provider().fetchCandidates(
+          { location: { lat: m.lat, lng: m.lng }, propertyType: "single_family" },
+          { radiusMiles: 2.5, lookbackMonths: LOOKBACK_MONTHS, limit: 2000 }
+        );
+        break;
+      } catch (err) {
+        const message = (err as Error)?.message ?? String(err);
+        if (attempt === POOL_ATTEMPTS) {
+          outcome.failure = `pool fetch failed after ${POOL_ATTEMPTS} attempts — ${message}`;
+          console.error(`  ${m.jurisdiction}/${m.name}: ${outcome.failure}`);
+        } else {
+          const wait = POOL_BACKOFF_MS * 2 ** (attempt - 1);
+          console.error(
+            `  ${m.jurisdiction}/${m.name}: pool fetch attempt ${attempt} failed ` +
+              `(${message}) — retrying in ${wait / 1000}s`
+          );
+          await new Promise(r => setTimeout(r, wait));
+        }
+      }
     }
+    if (!pool) continue;
+    outcome.pool = pool.length;
 
     const usable = pool.filter(
       c => c.assessedValue && c.assessedValue > 0 && c.propertyType !== "other" && c.propertyType !== "land"
@@ -140,6 +249,9 @@ async function main() {
     const testable = m.assessmentDate ? usable.filter(c => c.soldDate > m.assessmentDate!) : usable;
     const step = Math.max(1, Math.floor(testable.length / N));
     const subs = testable.filter((_, i) => i % step === 0).slice(0, N);
+    outcome.usable = usable.length;
+    outcome.testable = testable.length;
+    outcome.sampled = subs.length;
 
     let done = 0;
     for (const s of subs) {
@@ -147,12 +259,19 @@ async function main() {
       const parcel = s.id.split("@")[0];
       // Hold out the subject's own sale and anything at or after it. Production
       // would use them; measuring against them is circular.
+      const cutoff = LAG_DAYS ? shiftDays(s.soldDate, LAG_DAYS) : s.soldDate;
       const candidates = usable
-        .filter(c => c.id.split("@")[0] !== parcel && c.soldDate < s.soldDate)
+        .filter(c => c.id.split("@")[0] !== parcel && c.soldDate < cutoff)
         // Mirror the route's fetch cap, which takes the most recent.
         .sort((a, b) => (a.soldDate < b.soldDate ? 1 : -1))
         .slice(0, CANDIDATE_LIMIT);
-      if (candidates.length < 10) continue;
+      if (candidates.length < 10) {
+        // Counted, not swallowed. At a 90-day lag this is the dominant reason a
+        // market thins out, and a run that hides it looks like a market that
+        // was never tried.
+        outcome.tooFewComps++;
+        continue;
+      }
 
       const base = { asOf: dayBefore(s.soldDate), ...(m.engineOptions ?? {}) };
       const row: Row = {
@@ -229,6 +348,7 @@ async function main() {
       rows.push(row);
       done++;
     }
+    outcome.rows = done;
     process.stdout.write(`  ${m.jurisdiction}/${m.name}: ${done} subjects\n`);
   }
 
@@ -237,7 +357,8 @@ async function main() {
     process.exit(1);
   }
 
-  const JURS = ["dc", "maryland", "fairfax"];
+  // Every jurisdiction that was ASKED FOR, not just the ones that answered.
+  const JURS = [...new Set(MARKETS.map(m => m.jurisdiction))];
 
   console.log(`\n${"═".repeat(100)}`);
   console.log("PUBLISHED FIGURE vs WHAT PRODUCTION DELIVERS");
@@ -251,7 +372,16 @@ async function main() {
 
   for (const j of [...JURS, "ALL"]) {
     const r = j === "ALL" ? rows : rows.filter(x => x.jurisdiction === j);
-    if (!r.length) continue;
+    if (!r.length) {
+      // PRINTED, NOT SKIPPED. `continue` here is how a jurisdiction disappears
+      // from its own accuracy report.
+      const why = outcomes
+        .filter(o => o.jurisdiction === j)
+        .map(o => o.failure ?? `${o.tooFewComps} of ${o.sampled} lacked comps`)
+        .join("; ");
+      console.log(`  ${j.padEnd(13)}${"0".padStart(4)}   — contributed NOTHING: ${why}`);
+      continue;
+    }
     // PAIRED ONLY. Taking each median over whatever that column happened to
     // produce compares different subsets of properties and reports the
     // difference as a gap — the same survivorship error that made a tight
@@ -274,6 +404,28 @@ async function main() {
         `${`${shown.toFixed(1)}%`.padStart(13)}` +
         `${pct(r.filter(x => x.exact).length, r.length).padStart(8)}` +
         `${pct(r.filter(x => x.upstreamError).length, r.length).padStart(10)}`
+    );
+  }
+
+  console.log(`\n${"═".repeat(100)}`);
+  console.log("WHERE THE SAMPLE WENT  — every market asked for, including the ones that gave nothing");
+  console.log("═".repeat(100));
+  console.log(
+    `  ${"market".padEnd(26)}${"pool".padStart(7)}${"usable".padStart(8)}` +
+      `${"testable".padStart(10)}${"sampled".padStart(9)}${"rows".padStart(7)}${"no comps".padStart(10)}`
+  );
+  console.log("  " + "─".repeat(96));
+  for (const o of outcomes) {
+    const name = `${o.jurisdiction}/${o.market}`;
+    if (o.failure) {
+      console.log(`  ${name.padEnd(26)}${"FAILED".padStart(7)}   ${o.failure}`);
+      continue;
+    }
+    console.log(
+      `  ${name.padEnd(26)}${String(o.pool).padStart(7)}${String(o.usable).padStart(8)}` +
+        `${String(o.testable).padStart(10)}${String(o.sampled).padStart(9)}` +
+        `${String(o.rows).padStart(7)}${String(o.tooFewComps).padStart(10)}` +
+        (o.rows === 0 ? "   ← CONTRIBUTED NOTHING" : "")
     );
   }
 

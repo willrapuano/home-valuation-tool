@@ -93,13 +93,21 @@ const SELECT_COLUMNS = `
  * code change and no decision. Serving is therefore opt-in per jurisdiction,
  * and adding a name here is the deliberate act that publishes a source.
  *
- * The first three are county public record and carry no redistribution
- * restriction. Arlington and Loudoun come from TitlePro247 farm-list exports
- * (`scripts/ingest-titlepro.ts`) — licensed third-party data, confirmed by the
- * licence holder as permitted for consumer display. Neither has any rows yet;
- * listing them means an ingest will be served rather than sitting inert.
+ * These three are county public record and carry no redistribution
+ * restriction.
+ *
+ * ARLINGTON AND LOUDOUN ARE DELIBERATELY ABSENT. They were briefly listed on
+ * the strength of a confirmation that TitlePro247 data may be shown to
+ * consumers; that position is now open again. The subscription is licensed for
+ * title production, and serving it through a separate consumer product may sit
+ * outside permitted use as well as entangling two businesses that are
+ * deliberately kept apart.
+ *
+ * Ingesting stays possible and serving does not. Add a name here only once
+ * someone has read the licence — it is a one-line change, and it is the only
+ * thing standing between a loaded table and a published estimate.
  */
-const DEFAULT_JURISDICTIONS = ["dc", "fairfax", "maryland", "arlington", "loudoun"] as const;
+const DEFAULT_JURISDICTIONS = ["dc", "fairfax", "maryland"] as const;
 
 export interface PostgresOptions {
   /**

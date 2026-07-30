@@ -12,6 +12,7 @@ import { MarylandProvider } from "@/lib/comps/providers/maryland";
 import { DcProvider } from "@/lib/comps/providers/dc";
 import { PostgresProvider } from "@/lib/comps/providers/postgres";
 import { hasDatabase } from "@/lib/db";
+import { mayPublishEstimate, valuationMode } from "@/lib/valuation-mode";
 
 /* ──────────────────────────────────────────────────────────────
    Upstream valuation service.
@@ -388,7 +389,12 @@ function noValuation(
   address: string,
   areaMedianIncome: number | null,
   fmr?: FmrResult,
-  reason: "no_data" | "low_confidence" = "no_data"
+  reason: "no_data" | "low_confidence" | "mailed_mode" = "no_data",
+  /**
+   * The sales behind the report that will be posted. Public record, and the
+   * thing an agent opens with — worth showing even when the number is not.
+   */
+  comps: unknown[] = []
 ): Record<string, unknown> {
   return {
     estimate: null,
@@ -403,9 +409,11 @@ function noValuation(
     degradedReason:
       reason === "low_confidence"
         ? "The recent sales near this property vary too widely to produce a reliable automated estimate."
-        : "We couldn't retrieve verified sales data for this property, so no automated estimate was produced.",
+        : reason === "mailed_mode"
+          ? "A full valuation report is being prepared and will be mailed for review."
+          : "We couldn't retrieve verified sales data for this property, so no automated estimate was produced.",
     degradedCode: reason,
-    comps: [],
+    comps,
     streetViewUrl: buildStreetViewUrl(address),
     fmr: fmr?.source === "hud" ? fmr.values : null,
     areaMedianIncome,
@@ -483,6 +491,23 @@ export async function POST(req: NextRequest) {
       // Measured over 291 holdout sales, 40% of low-confidence estimates are
       // more than 20% wrong around a range a median 80% wide — an anchor
       // rather than information. See lib/comps/publish.ts.
+      // MAILED MODE: the estimate is computed and logged, and does not leave
+      // the server. The comps do — they are public record, they need no
+      // accuracy claim, and they are what an agent leads with. The number
+      // arrives later, on paper, with the agent's name on it.
+      if (valued && !mayPublishEstimate()) {
+        const [areaMedianIncome, fmr] = await Promise.all([amiPromise, fmrPromise]);
+        console.info(
+          `[avm] mailed mode: withholding ${valued.source} estimate of ` +
+            `${valued.estimate} (${valued.compCount} comps, ${valued.confidence}) ` +
+            `— returning ${valued.comps.length} comps`
+        );
+        return await respond(
+          cacheKey,
+          noValuation(fullAddress, areaMedianIncome, fmr, "mailed_mode", valued.comps)
+        );
+      }
+
       if (valued) {
         const decision = shouldPublishEstimate(valued);
         if (!decision.publish) {

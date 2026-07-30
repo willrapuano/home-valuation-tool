@@ -102,6 +102,29 @@ npx tsx scripts/data-source-canary.ts   # exits non-zero when the source is brok
 do — public records cover Fairfax County and all of Maryland, the external
 upstream covers everywhere else.
 
+## Is production running this?
+
+```bash
+npx tsx scripts/production-parity.ts
+```
+
+Reads `/api/version` on the live site and compares its commit SHA against
+`origin/main`. Exits non-zero on a mismatch, retrying with backoff so a
+deployment still building is a pass rather than a false alarm.
+
+**Run it after every merge.** Measured 2026-07-30: while this repository
+redesigned the landing page, built the accuracy display gate and corrected three
+county medians, the live site went on serving a build **eight commits behind** —
+`⚡ 30-Second Results`, `🔒 100% Private` and an unrounded seven-digit estimate —
+because the pull request was open and never merged. Every "verified by
+rendering" in that work was true, and none of it was deployed.
+
+Nothing in the codebase could detect that, because nothing ever asked production
+what it was running. Local tests, local screenshots and live backtests all pass
+against a build no homeowner sees.
+
+---
+
 ## Coverage and measured accuracy
 
 Public-records providers are declared in `COVERAGE` in `app/api/avm/route.ts`
@@ -134,6 +157,15 @@ clears the confidence gate; below it the tool offers a CMA rather than a number.
 Coverage varies more by market than by jurisdiction — Annandale publishes 100%,
 Bethesda 44% — so the per-market table in `docs/jurisdiction-data-sources.md`
 is the one to read before trusting an average.*
+
+> ⚠️ **The Maryland row above is measured at zero publishing lag and is
+> optimistic.** It withholds comps only from the sale date onward, which assumes
+> the county publishes a sale the moment it closes. Maryland's state feed runs
+> about a quarter behind. Re-run under that lag it is **11.7%**, not 6.9% — see
+> [Displayed precision](#displayed-precision) below, and run
+> `npx tsx scripts/production-path-backtest.ts 25 90`. The figure the UI shows
+> is the lagged one; this table is kept because it is the like-for-like
+> comparison of the engine path against the product path.
 
 The engine column, on larger per-source samples, is DC 4.5% / Fairfax 5.3% /
 Maryland 8.7%. Those describe the scoring, not what a homeowner receives — see
@@ -203,8 +235,233 @@ uptime monitor at `/api/health`, which returns 503 in that state.
 
 - **Framework:** Next.js 14 (App Router)
 - **Styling:** Tailwind CSS
-- **Brand:** Navy #0B1D3A + Gold #C9A84C (Sotheby's palette)
 - **Deploy:** Vercel
+
+### Design
+
+The pages follow the format the tools homeowners have already used converge on —
+Redfin, Zillow, Homebot, Opendoor: a plain-language question as the headline, one
+address field in the hero, and substance below the fold in the order accuracy →
+method → who prepared it → questions. Contact details are asked for once, at step
+3, and never in the hero.
+
+Colours are semantic tokens, not literal ones. `bg-paper`, `bg-canvas`,
+`text-ink`, `text-ink-muted`, `border-rule` are defined once in
+`app/globals.css` and mapped in `tailwind.config.ts`; navy is the button and
+footer ink, gold is a hairline accent and never body text on a light surface
+(`#C9A84C` on white is about 2:1 contrast — use `gold-deep` if a gold-toned word
+is genuinely wanted). Headlines are set in Source Serif, body in Inter.
+
+The landing page is a server component with `revalidate = 86400`. It reads live
+county sale counts through `lib/market-pulse.ts`, which has a hard timeout and
+returns `null` on any failure — the hero then renders a coverage panel instead.
+Nothing on the page is allowed to block or fail the render.
+
+**Daily, not hourly, and never per pageview.** Getting a true median costs a
+paginated ArcGIS query, and county services rate-limit; their rate limit would
+become this page's latency. Market statistics do not move intra-day, so one
+rebuild a day is the right granularity — four requests per day per deployment.
+
+**Which market is per-tenant** (`NEXT_PUBLIC_AGENT_MARKET`, keys in
+`lib/markets.ts`). The figures were hardcoded to Fairfax, so a Bethesda agent's
+visitors read Fairfax medians. An unrecognised key falls back to the coverage
+panel rather than to another county's numbers.
+
+**The window is anchored to the newest sale on file, not to today.** Measured
+2026-07-30: the Maryland state sales feed's newest transfer was 2026-04-30 —
+three months behind. A fixed "last 90 days" would have reported *zero* sales for
+every Maryland tenant. Anchoring to the data always produces a real window and
+makes the lag visible rather than hiding it. This lag applies to the valuation
+engine's Maryland comps too, not just to the hero.
+
+### Displayed precision
+
+`lib/accuracy.ts` is the single source for the backtest figures and for how the
+estimate is rendered. The results screen used to print `$1,951,882` — seven
+significant digits on a number whose measured median error is 6.1%, roughly
+±$119,000. That is asserting precision the backtest says we do not have, and it
+contradicted the accuracy section on the landing page.
+
+The headline is now three significant figures (`$1.95M`) with the measured band
+for that jurisdiction underneath it (`give or take $92,000 — half of estimates
+in Washington, DC land within 4.7% of the sale price`).
+
+#### No percentage without a production-path measurement
+
+`accuracyLine()` returns **null** for any jurisdiction whose measurement does not
+describe what a visitor actually gets, and the UI shows the data's recency
+instead. There is no hedged middle state: a figure is either safe to print or it
+is withheld, and every entry carries a `basis` string saying where it came from.
+
+**The rule caught Maryland.** Every backtest here draws its subjects from the
+same lagged pool as its comps, so subject and comps sit behind Maryland's
+publishing lag together and the forward extrapolation cancels. That reported
+6.6%. `scripts/production-path-backtest.ts` now takes a lag argument, and run the
+way Maryland actually works:
+
+```bash
+npx tsx scripts/production-path-backtest.ts 25 90
+```
+
+| run | jurisdiction | paired | record subj | live subj | published | **MdAPE shown** | exact |
+|---|---|---|---|---|---|---|---|
+| A | dc | 37 | 5.1% | 4.5% | 90% | **4.5%** | 100% |
+| A | maryland | 44 | 8.6% | 10.3% | 67% | **11.7%** | 88% |
+| B | dc | 36 | 5.7% | 5.7% | 85% | **5.2%** | 100% |
+| B | maryland | 36 | 6.8% | 8.2% | 69% | **10.1%** | 88% |
+| B | fairfax | 49 | 6.7% | 6.7% | 96% | **6.6%** | 88% |
+| C | dc | 37 | 6.0% | 6.0% | 83% | **5.0%** | 100% |
+| C | maryland | 47 | 8.0% | 9.1% | 66% | **11.2%** | 100% |
+| C | fairfax | 49 | 6.7% | 6.7% | 96% | **6.6%** | 88% |
+
+Run C governs: first with Maryland's subject lookup fixed, first with Rockville
+contributing, largest Maryland sample. Maryland's `exact` went 88% → **100%** —
+the two-phase lookup does not just succeed more often, it resolves the right
+parcel every time.
+
+**A prediction that was wrong, kept because it was wrong.** Fixing the lookup was
+expected to raise Maryland's publish rate. It did not — 67%, 69%, 66% across the
+three runs. Coverage is limited by how many usable comps survive the lag, not by
+lookups failing. The fix bought correctness, not reach. Only fresher data buys
+reach.
+
+**Maryland is 10–12%, not 6.6%.** Three runs at n=36–47 gave 11.7%, 10.1% and
+11.2%; the highest ships, because they span about 1.6pp of sampling noise and
+every figure here is a floor (see below). It carries the condition it was measured
+under: *"half of estimates in Maryland land within 11.7% of the sale price,
+measured under Maryland's ~3-month reporting lag."* Without that qualifier the
+number reads as the engine being bad at Maryland houses rather than working from
+records a quarter old.
+
+**DC is the control and it behaves.** 4.5% and 5.2% under a 90-day cutoff
+against 4.7% unlagged — flat, as expected for a jurisdiction publishing within
+~10 days. A harness that moved DC would be measuring itself, not the lag.
+
+**Fairfax under the same lag is 6.6%, better than the 7.5% displayed.** Its
+valuations rest on assessed value, and an assessment does not go stale the way a
+comp does. The conservative figure is kept.
+
+Every displayed figure carries `measuredUnderLagDays` and `sampleSize`
+structurally, and a test asserts that any figure measured under a nonzero lag
+also carries a user-visible `qualifier` — so a lagged number cannot be shown
+bare. That check used to grep the `basis` prose for "cutoff" and broke the
+moment DC's basis mentioned its control run.
+
+**There is no pooled headline figure any more.** The old "6.1% across eight
+markets" averaged jurisdictions with different publishing lags, and included
+Maryland at its optimistic 6.6%. An average across counties that publish at
+different speeds is not a quantity anyone receives. The per-jurisdiction table
+is the claim.
+
+**Every figure here is a floor.** One leak is shared by every backtest in this
+repository and cannot be closed with the data available: the subject's
+`assessedValue` is the *current* assessment, and assessments chase sales. A
+holdout that sold in March may already have been reassessed to reflect that
+sale. A live visitor's future sale cannot flatter their assessment the same way.
+The leak is uniform across cutoffs, so *differences* stay clean — the lag cost,
+the engine-vs-product gap, the effect of a filter — but *levels* are optimistic.
+
+It bites hardest where the assessment **is** the subject: Fairfax publishes no
+living area, beds or year built, so its valuations rest almost entirely on
+assessed value. DC and Maryland at least carry physical characteristics
+alongside it, and Maryland reassesses triennially rather than annually, so its
+assessments are on average staler and *less* able to encode a recent sale.
+
+The out-of-time test closes this axis by construction: subjects that sell
+*after* the assessments used to value them cannot leak. Once this autumn's
+transfers publish — late October for Maryland — that run is not confirmation,
+it is the first leak-free measurement, and it says how much of a floor these
+numbers are.
+
+**`scripts/lag-cost.ts` was audited for the other obvious leak** and is clean: it calls
+`valueFromComps` with only `asOf` and `maxAssessmentRatioDeviation`, never a
+`market` override, so `calibrateMarket` refits `annualAppreciation` on the
+cut-off candidate set every iteration. The rate does not peek at the future. One
+leak remains and is shared by every backtest here — the subject's `assessedValue`
+is the current assessment — but it is identical at every cutoff, so the
+*difference* between rows is clean.
+
+`JURISDICTION_ACCURACY` is keyed by **provider slug**, not market key. Every
+Maryland county is served by the one Maryland provider and reports `maryland`,
+so adding counties to `lib/markets.ts` cannot mint per-county accuracy claims
+that were never measured. A test asserts that cross-product stays empty, and another asserts every
+displayed figure's `basis` names the production path — an engine-path number in
+a production-path slot is exactly the substitution `displayable` exists to
+prevent.
+
+**A market that contributes nothing now says so.** `production-path-backtest.ts`
+prints a `WHERE THE SAMPLE WENT` table covering every market it was asked for,
+with pool / usable / testable / sampled / rows / no-comps counts, and marks any
+that produced zero rows. A jurisdiction with no rows prints
+`contributed NOTHING` with the reason instead of being skipped by the summary
+loop. That omission is how a run reported DC and Maryland while quietly not
+mentioning Fairfax at all.
+
+#### The Maryland lag is structural, not an ingest problem
+
+Checked and recorded in `scripts/lag-cost.ts`: both iMAP layers carry the
+identical lag, as does every service in iMAP's PlanningCadastre catalogue; MDP's
+own `mdpgis.mdp.state.md.us` hosts no sales; Montgomery County open data
+publishes tax rolls only; SDAT Real Property Search returns 403 to automated
+requests. There is no free fresher Maryland source, so fresh Maryland sales are
+another thing a TitlePro247 / MDLandRec subscription would unlock.
+
+The engine already time-adjusts each comp forward by its age (`adjustComp`,
+`annualAppreciation`), so the point estimate is not naively comparing July to
+April — but the rate is fitted on sales that also stop in April, and 11.7% is
+what that extrapolation costs in practice. An HPI-indexed market-conditions
+adjustment would replace the local fit with a published index.
+
+Every screen that shows comps — results, shareable report, and the mailed-CMA
+screen an agent approves letters from — prints *"Based on sales recorded through
+30 April 2026 — this jurisdiction publishes sales about 3 months behind."* The
+date comes from the newest comp actually shown.
+
+#### Hero medians: filtered, or withheld
+
+`scripts/market-benchmark.ts` prints each market's quartiles filtered and
+unfiltered, and does an **offline PIN join** for Fairfax that a pageview cannot
+afford. Measured over each market's own 90-day window:
+
+| market | as queried | restricted to dwellings | gap |
+|---|---|---|---|
+| Washington, DC | $920,000 (n=1,459) | **$870,000** (n=1,115) | −$50,000 |
+| Fairfax County | $801,005 (n=4,077) | **$850,000** (n=3,587) | +$48,995 |
+
+Fairfax owed almost exactly the correction DC did, in the opposite direction —
+DC's contaminants were hotels and offices, dearer than the housing stock;
+Fairfax's are vacant land and small commercial, cheaper. 12.0% of Fairfax
+"sales" are not dwellings.
+
+DC filters on `PROPTYPE` and Maryland on `LU`. **Fairfax cannot**, so it now
+shows its count and *withholds its median* — the same rule as the accuracy
+percentages, since a median $49,000 light is the one figure an agent verifies
+from memory. Restoring it needs an ingested PIN → land-use table so the join
+happens once offline rather than per pageview; `market-benchmark.ts` already
+proves the join works, and `DATABASE_URL` is what unlocks it.
+
+Maryland's `LU` filter is also a large **speedup** on the sales layer — the
+median at offset 1,350 measured 72.1s unfiltered against 15.0s with `LU IN` —
+which is the opposite of the parcel layer, where the same filter costs 10.9s
+against 1.0s.
+
+`scopeLabel()` derives the panel's wording from the filters that actually ran, so
+a removed filter cannot leave a claim behind. `scopeFilters` (market identity,
+e.g. `JURSCODE`) are kept separate from `qualityFilters` (arm's-length,
+residential): the benchmark's baseline drops the latter only. Conflating them
+compared Montgomery's 2,715 sales against 21,059 statewide ones.
+
+**Comparing a median against Bright:** match the window. These windows end at the
+newest *recorded* sale, so Montgomery's $654,300 is a January–April window and
+belongs beside spring closed medians, not July's. Expect a few points of drift
+from recorded-vs-settled dates and from Bright seeing only MLS-listed stock.
+Close is a pass; exact would be suspicious.
+
+`low`/`high` from the engine are **not** a confidence interval and are no longer
+labelled as one. They come out of `reconcile()` as the weighted dispersion of
+the adjusted comps — how much the sales disagree with each other — which is a
+different quantity, typically about four times wider. They read "the sales
+themselves spread X – Y".
 
 ---
 
@@ -241,17 +498,41 @@ prepared-CMA screen.
 
 ## Reselling to Other Agents
 
-To deploy for a new agent, update these env vars:
-- `NEXT_PUBLIC_AGENT_NAME`
-- `NEXT_PUBLIC_AGENT_EMAIL`
-- `NEXT_PUBLIC_AGENT_PHONE`
-- `NEXT_PUBLIC_AGENT_BROKERAGE`
-- `NEXT_PUBLIC_AGENT_LICENSE`
-- `GHL_API_KEY` (agent's GHL account)
-- Replace `/public/candee-headshot.png` with agent headshot
+Every branded string is read from `lib/agent.ts`, which reads these. Nothing
+outside that module should mention an agent by name.
 
-Note: agent details are currently still hardcoded in `HomeValuationFlow.tsx` and
-`Step4Results.tsx`. Wiring them to the env vars above is a prerequisite for resale.
+| Variable | Notes |
+| --- | --- |
+| `NEXT_PUBLIC_AGENT_NAME` | |
+| `NEXT_PUBLIC_AGENT_EMAIL` | |
+| `NEXT_PUBLIC_AGENT_PHONE` | |
+| `NEXT_PUBLIC_AGENT_BROKERAGE` | **Required.** VA/MD/DC advertising rules require the brokerage's name on agent-branded advertising. Rendered in the header, footer, agent card, results screen and shareable report. |
+| `NEXT_PUBLIC_AGENT_LICENSE` | Rendered alongside the brokerage, not separately from it. |
+| `NEXT_PUBLIC_AGENT_HEADSHOT` | Path under `public/`. Hides itself if missing. |
+| `NEXT_PUBLIC_AGENT_MARKET` | Which county's live figures the hero shows. See `lib/markets.ts`. |
+| `GHL_API_KEY` | The agent's own GHL account. |
+
+---
+
+## Fulfillment: the mailed CMA
+
+Settled, so it does not get rebuilt here by mistake:
+
+- **The PDF renders in `velocity-connectors`.** A WeasyPrint CMA renderer already
+  exists there. Do not build a second one in this repo.
+- **The Thanks.io account is a platform account**, with credentials alongside the
+  connectors — not per agent, and not in this repo's environment.
+- **It is a review queue, not auto-send**, gated behind `FULFILLMENT_MODE`. A
+  person approves each piece before it goes to post.
+
+What this repo owes that pipeline is the lead plus the comps behind it, which is
+what `/api/lead` and `/api/email-report` already carry. `VALUATION_MODE=mailed`
+is the switch that stops showing a figure on screen; see `lib/valuation-mode.ts`.
+
+`DATABASE_URL` remains unset and is the account owner's to provide. Until it is,
+`scripts/ingest.ts` has nowhere to write, the ingest table stays empty, and every
+lookup queries the county services live. `scripts/ingest-status.ts` exits green
+in that state rather than failing the scheduled workflow.
 
 ---
 

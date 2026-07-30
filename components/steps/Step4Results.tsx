@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import Image from "next/image";
+import { Fragment, useState } from "react";
 import { AddressData, LeadData, ValuationData } from "../HomeValuationFlow";
 import PreparingValuation from "./PreparingValuation";
+import { agent, agentFirstName } from "@/lib/agent";
+import {
+  accuracyLine,
+  formatEstimate,
+  jurisdictionLabel,
+  newestCompDate,
+  recencyLine,
+} from "@/lib/accuracy";
 
 interface Props {
   address: AddressData;
@@ -20,22 +27,30 @@ function formatCurrency(n: number): string {
   }).format(n);
 }
 
+/**
+ * Confidence, stated rather than colour-coded.
+ *
+ * The old version was a pulsing green or amber dot in a tinted pill, which is
+ * dashboard furniture — it draws the eye and says nothing. What a homeowner
+ * needs to know is how wide the range is and why, and that is now written out
+ * in the range line beside it.
+ */
 function ConfidenceBadge({ confidence }: { confidence: string }) {
-  const isHigh = confidence === "high";
+  const label =
+    confidence === "high"
+      ? "High confidence"
+      : confidence === "medium"
+      ? "Moderate confidence"
+      : "Low confidence";
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold border ${
-        isHigh
-          ? "bg-green-400/10 border-green-400/30 text-green-400"
-          : "bg-yellow-400/10 border-yellow-400/30 text-yellow-400"
-      }`}
-    >
+    <span className="inline-flex items-center gap-2 text-sm text-ink-muted">
       <span
-        className={`w-1.5 h-1.5 rounded-full animate-pulse ${
-          isHigh ? "bg-green-400" : "bg-yellow-400"
+        aria-hidden="true"
+        className={`w-1.5 h-1.5 rounded-full ${
+          confidence === "high" ? "bg-emerald-600" : "bg-amber-600"
         }`}
       />
-      {isHigh ? "High Confidence" : "Estimated"}
+      {label}
     </span>
   );
 }
@@ -76,74 +91,131 @@ type ResolvedValuation = ValuationData & { estimate: number; low: number; high: 
  *
  * It also invites disagreement, which is the point: an argument about which
  * comps are right is the conversation the agent wants to be in.
+ *
+ * Laid out as a table rather than a stack of cards. Sale prices are figures to
+ * be compared down a column, which is what every listing site and every CMA
+ * does with them, and what the card layout made impossible.
  */
 function ComparableSales({ comps }: { comps: ResolvedValuation["comps"] }) {
-  const [open, setOpen] = useState(false);
-  const shown = open ? comps : comps.slice(0, 3);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? comps : comps.slice(0, 4);
 
   return (
-    <div className="mt-5 text-left">
-      <p className="text-white/50 text-xs font-semibold uppercase tracking-wide mb-2">
-        Sales this estimate is based on
+    <section className="mt-12">
+      <h2 className="font-serif text-2xl text-ink">The sales this is based on</h2>
+      <p className="mt-2 text-[15px] text-ink-muted max-w-2xl leading-relaxed">
+        Recorded sale prices, public record. Each is adjusted for how it differs from your
+        home — a smaller house nearby implies a higher value for yours, and the reverse.
       </p>
 
-      <ul className="space-y-2">
-        {shown.map(c => (
-          <li
-            key={`${c.address}-${c.soldDate}`}
-            className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+      {/*
+        No horizontal scroll on a phone. The "Sold" column is folded into the
+        address subline below `sm` instead — a table that runs off the right
+        edge reads as broken, and the scroll affordance is invisible until
+        someone happens to swipe it.
+      */}
+      <div className="mt-6 card rounded-lg overflow-hidden">
+        <div>
+          <table className="w-full text-[15px]">
+            <thead>
+              <tr className="bg-canvas border-b border-rule text-left">
+                <th scope="col" className="font-medium text-ink-muted px-3 sm:px-5 py-3">Address</th>
+                <th scope="col" className="hidden sm:table-cell font-medium text-ink-muted px-4 py-3">
+                  Sold
+                </th>
+                <th scope="col" className="font-medium text-ink-muted px-2 sm:px-4 py-3 text-right">
+                  Sale price
+                </th>
+                <th scope="col" className="font-medium text-ink-muted px-3 sm:px-5 py-3 text-right">
+                  Adjusted
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map(c => {
+                const key = `${c.address}-${c.soldDate}`;
+                const open = expanded === key;
+                return (
+                  <Fragment key={key}>
+                    <tr
+                      className="border-b border-rule last:border-0 hover:bg-canvas/60 cursor-pointer"
+                      onClick={() => setExpanded(open ? null : key)}
+                    >
+                      <td className="px-3 sm:px-5 py-3.5">
+                        <span className="text-ink">{c.address || "Nearby home"}</span>
+                        <span className="block text-[13px] text-ink-faint mt-0.5 tnum">
+                          <span className="sm:hidden">
+                            {c.monthsAgo === 0 ? "This month" : `${c.monthsAgo} mo ago`} ·{" "}
+                          </span>
+                          {c.distanceMiles} mi
+                          {c.sqft ? ` · ${c.sqft.toLocaleString()} sqft` : ""}
+                          <span className="hidden sm:inline">
+                            {c.beds ? ` · ${c.beds} bd` : ""}
+                            {c.baths ? ` · ${c.baths} ba` : ""}
+                          </span>
+                        </span>
+                      </td>
+                      <td className="hidden sm:table-cell px-4 py-3.5 text-ink-muted whitespace-nowrap tnum">
+                        {c.monthsAgo === 0 ? "This month" : `${c.monthsAgo} mo ago`}
+                      </td>
+                      <td className="px-2 sm:px-4 py-3.5 text-right text-ink-muted tnum whitespace-nowrap">
+                        {formatCurrency(c.soldPrice)}
+                      </td>
+                      <td className="px-3 sm:px-5 py-3.5 text-right text-ink font-medium tnum whitespace-nowrap">
+                        {formatCurrency(c.adjustedPrice)}
+                        {c.adjustments.length > 0 && (
+                          <span
+                            aria-hidden="true"
+                            className={`inline-block ml-2 text-ink-faint transition-transform ${
+                              open ? "rotate-180" : ""
+                            }`}
+                          >
+                            ⌄
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+
+                    {open && c.adjustments.length > 0 && (
+                      <tr className="border-b border-rule last:border-0 bg-canvas">
+                        <td colSpan={4} className="px-3 sm:px-5 py-4">
+                          <p className="eyebrow mb-3">Adjustments toward your home</p>
+                          <dl className="space-y-1.5 max-w-sm">
+                            {c.adjustments.map(a => (
+                              <div key={a.label} className="flex justify-between gap-6 text-sm">
+                                <dt className="text-ink-muted">{a.label}</dt>
+                                <dd className="tnum text-ink">
+                                  {a.amount >= 0 ? "+" : "−"}
+                                  {formatCurrency(Math.abs(a.amount))}
+                                </dd>
+                              </div>
+                            ))}
+                            <div className="flex justify-between gap-6 text-sm pt-2 mt-1 border-t border-rule font-medium">
+                              <dt className="text-ink">Comparable to your home</dt>
+                              <dd className="tnum text-ink">{formatCurrency(c.adjustedPrice)}</dd>
+                            </div>
+                          </dl>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {comps.length > 4 && (
+          <button
+            onClick={() => setShowAll(o => !o)}
+            className="w-full px-3 sm:px-5 py-3 text-sm font-medium text-navy hover:bg-canvas border-t border-rule transition-colors text-left"
           >
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-white/90 text-sm font-medium">{c.address}</span>
-              <span className="text-white font-semibold text-sm whitespace-nowrap">
-                {formatCurrency(c.soldPrice)}
-              </span>
-            </div>
-
-            <p className="text-white/40 text-xs mt-1">
-              {c.distanceMiles} mi away
-              {" · "}
-              {c.monthsAgo === 0 ? "sold this month" : `sold ${c.monthsAgo}mo ago`}
-              {c.sqft ? ` · ${c.sqft.toLocaleString()} sqft` : ""}
-              {c.beds ? ` · ${c.beds} bd` : ""}
-              {c.baths ? ` · ${c.baths} ba` : ""}
-            </p>
-
-            {c.adjustments.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-white/10">
-                {c.adjustments.map(a => (
-                  <p key={a.label} className="text-white/40 text-xs flex justify-between gap-3">
-                    <span>{a.label}</span>
-                    <span className={a.amount >= 0 ? "text-green-400/70" : "text-red-400/70"}>
-                      {a.amount >= 0 ? "+" : "−"}
-                      {formatCurrency(Math.abs(a.amount))}
-                    </span>
-                  </p>
-                ))}
-                <p className="text-white/60 text-xs flex justify-between gap-3 mt-1 font-medium">
-                  <span>Comparable to your home</span>
-                  <span>{formatCurrency(c.adjustedPrice)}</span>
-                </p>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      {comps.length > 3 && (
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="text-gold/80 hover:text-gold text-xs mt-2 font-medium transition-colors"
-        >
-          {open ? "Show fewer" : `Show all ${comps.length} sales`}
-        </button>
-      )}
-
-      <p className="text-white/30 text-xs mt-3">
-        Sale prices are public record. Each is adjusted for how it differs from your
-        home — a smaller house nearby implies a higher value for yours, and vice versa.
-      </p>
-    </div>
+            {showAll ? "Show fewer" : `Show all ${comps.length} sales`}
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -183,6 +255,9 @@ function FullResults({
           fmr: valuation.fmr,
           areaMedianIncome: valuation.areaMedianIncome,
           source: valuation.source,
+          // Needed for the report's error band; `source` is "county-comps" for
+          // every county alike and cannot distinguish them.
+          sourceJurisdiction: valuation.sourceJurisdiction,
           degraded: valuation.degraded,
           degradedReason: valuation.degradedReason,
           // So the shared report shows the same sales as this screen. The
@@ -211,12 +286,12 @@ function FullResults({
   const streetViewUrl =
     valuation.streetViewUrl ?? `/api/streetview?location=${encodeURIComponent(address.full)}`;
 
-
-  const CMA_SUBJECT = encodeURIComponent(`Free CMA Request — ${address.full}`);
+  const CMA_SUBJECT = encodeURIComponent(`CMA request — ${address.full}`);
   const CMA_BODY = encodeURIComponent(
-    `Hi Candee,\n\nI'd like to request a free CMA for ${address.full}.\n\nEmail: ${lead.email}\n\nThank you!`
+    `Hi ${agentFirstName},\n\nI'd like a comparative market analysis for ${address.full}.\n\nEmail: ${lead.email}\n\nThank you.`
   );
-  const CMA_URL = `mailto:ccurrie@ttrsir.com?subject=${CMA_SUBJECT}&body=${CMA_BODY}`;
+  const CMA_URL = `mailto:${agent.email}?subject=${CMA_SUBJECT}&body=${CMA_BODY}`;
+  const TEL = `tel:${agent.phone.replace(/[^\d+]/g, "")}`;
 
   // Only ever a real figure: a rent Zestimate for this property, or HUD Fair
   // Market Rents when a token is configured. The static NoVA table that used
@@ -224,361 +299,256 @@ function FullResults({
   const suggestedRent = valuation.rentZestimate ?? valuation.fmr?.threeBr ?? null;
   const pricePerSqft = valuation.pricePerSqft ?? null;
 
+  const streetLine = `${address.streetNumber} ${address.streetName}`.trim() || address.full;
+
+  const accuracyBand = accuracyLine(valuation.estimate, valuation.sourceJurisdiction);
+  const recency = recencyLine(newestCompDate(valuation.comps));
+
   return (
-    <div className="animate-slide-up space-y-5 w-full">
+    <div className="animate-fade-in w-full">
+      {/* ── The number, and the address it belongs to ──────────────── */}
+      <header>
+        <p className="eyebrow">Estimated market value</p>
+        {/*
+          ROUNDED, ON PURPOSE. This printed $1,951,882 — seven significant
+          digits on a figure whose measured median error in this jurisdiction is
+          several percent. That is asserting a precision the backtest says we do
+          not have, and it contradicts the accuracy section on the landing page.
+          Three significant figures, with the measured band stated underneath.
+        */}
+        <p className="mt-3 font-serif text-5xl md:text-6xl text-ink tnum leading-none">
+          {formatEstimate(valuation.estimate)}
+        </p>
+        {/*
+          One or the other, never a hedge. `accuracyLine` returns null for a
+          jurisdiction whose measurement does not reflect production — Maryland,
+          whose backtest pool is as lagged as its comps — and the recency line
+          takes its place: a fact about the evidence rather than an estimate of
+          an estimate. See lib/accuracy.ts.
+        */}
+        {accuracyBand ? (
+          <p className="mt-2 text-[15px] text-ink-muted tnum">{accuracyBand}</p>
+        ) : recency ? (
+          <p className="mt-2 text-[15px] text-ink-muted">{recency}</p>
+        ) : null}
 
-      {/* ══════════════════════════════════════════════════════════════
-          1. HERO — Street View + Value Overlay
-      ══════════════════════════════════════════════════════════════ */}
-      <div className="relative rounded-2xl overflow-hidden gold-border">
-        {/* Street View Photo */}
-        {!imgError ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={streetViewUrl}
-            alt={`Street view of ${address.full}`}
-            className="w-full h-60 md:h-72 object-cover"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <div className="w-full h-60 md:h-72 bg-gradient-to-br from-navy via-[#0d2448] to-[#0B1D3A] flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-4xl mb-2">🏡</div>
-              <p className="text-white/20 text-sm">Street view unavailable</p>
-            </div>
-          </div>
-        )}
+        <p className="mt-5 text-lg text-ink">{streetLine}</p>
+        <p className="text-ink-muted">
+          {address.city}
+          {address.city ? ", " : ""}
+          {address.state} {address.zipCode}
+        </p>
 
-        {/* Gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-navy via-navy/65 to-transparent" />
+        <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">
+          {/*
+            NOT a confidence interval, and no longer labelled as one. `low` and
+            `high` come out of reconcile() as the weighted dispersion of the
+            adjusted comps — how much the sales disagree with each other, which
+            is a different quantity from how far the estimate lands from the
+            eventual sale price. Printing them next to the measured band above
+            under the label "likely range" invited them to be read as the same
+            thing, and they are typically four times wider.
+          */}
+          <span className="text-[15px] text-ink-muted tnum">
+            The sales themselves spread {formatEstimate(valuation.low)} –{" "}
+            {formatEstimate(valuation.high)}
+          </span>
+          <ConfidenceBadge confidence={valuation.confidence} />
+        </div>
 
-        {/* Overlaid content */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 md:p-7">
-          <p className="text-white/50 text-xs uppercase tracking-widest mb-1">
-            Estimated Market Value
+        {valuation.compCount ? (
+          <p className="mt-3 text-sm text-ink-muted max-w-2xl leading-relaxed">
+            Built from {valuation.compCount} comparable{" "}
+            {valuation.compCount === 1 ? "sale" : "sales"}
+            {valuation.compRadiusMiles ? ` within ${valuation.compRadiusMiles} miles` : ""}
+            {valuation.lookbackMonths
+              ? `, closed in the last ${valuation.lookbackMonths} months`
+              : ""}
+            , each adjusted toward your property.
           </p>
-          <p className="text-3xl md:text-5xl font-bold text-gold leading-none mb-2">
-            {formatCurrency(valuation.estimate)}
-          </p>
-          <p className="text-white font-semibold text-base mb-1">
-            {address.streetNumber} {address.streetName}
-            <span className="text-white/40 font-normal text-sm ml-2">
-              {address.city}, {address.state} {address.zipCode}
-            </span>
-          </p>
+        ) : null}
+      </header>
 
-          {/* Confidence + quick-stats row */}
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            <ConfidenceBadge confidence={valuation.confidence} />
-            {valuation.beds && (
-              <span className="text-white/50 text-xs">
-                {valuation.beds} bd
-              </span>
-            )}
-            {valuation.baths && (
-              <span className="text-white/50 text-xs">· {valuation.baths} ba</span>
-            )}
-            {valuation.sqft && (
-              <span className="text-white/50 text-xs">· {valuation.sqft.toLocaleString()} sqft</span>
-            )}
-            {valuation.yearBuilt && (
-              <span className="text-white/50 text-xs">· Built {valuation.yearBuilt}</span>
-            )}
-          </div>
+      {/* ── The house ──────────────────────────────────────────────── */}
+      {!imgError && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={streetViewUrl}
+          alt={`Street view of ${address.full}`}
+          className="mt-8 w-full h-56 md:h-72 object-cover rounded-lg border border-rule"
+          onError={() => setImgError(true)}
+        />
+      )}
 
-          {/* Buttons */}
-          <div className="flex gap-3 flex-wrap">
-            <a
-              href={CMA_URL}
-              className="gold-gradient text-navy font-bold px-5 py-2.5 rounded-xl text-sm hover:opacity-90 transition-all shadow-lg shadow-gold/20"
-            >
-              Request Free CMA →
-            </a>
+      {/* ── Actions ────────────────────────────────────────────────── */}
+      <div className="mt-8 flex flex-wrap gap-3">
+        <a
+          href={CMA_URL}
+          className="h-12 inline-flex items-center px-6 bg-navy hover:bg-navy-light text-white font-semibold rounded-md text-[15px] transition-colors"
+        >
+          Ask {agentFirstName} to review this
+        </a>
+        <button
+          onClick={handleEmailReport}
+          disabled={emailLoading || emailSent}
+          className="h-12 inline-flex items-center px-6 border border-ink/25 hover:border-navy text-ink font-medium rounded-md text-[15px] transition-colors disabled:opacity-60"
+        >
+          {emailSent ? "Emailed to you" : emailLoading ? "Sending…" : "Email me this report"}
+        </button>
+      </div>
+
+      {emailSent && (
+        <div className="mt-4 card rounded-md px-5 py-4">
+          <p className="text-[15px] text-ink">
+            Sent to <span className="font-medium">{lead.email}</span>.{" "}
+            {agentFirstName} will follow up within 24 hours with the things an automated
+            estimate cannot see.
+          </p>
+          {reportUrl && (
             <button
-              onClick={handleEmailReport}
-              disabled={emailLoading || emailSent}
-              className="bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-all disabled:opacity-60 flex items-center gap-2"
+              onClick={handleCopyLink}
+              className="mt-2 text-sm font-medium text-navy hover:underline"
             >
-              {emailSent ? "✓ Request Received!" : emailLoading ? "Sending..." : "📧 Get Full Report"}
+              {linkCopied ? "Link copied" : "Copy a link to this report"}
             </button>
-            <button
-              onClick={onStartOver}
-              className="bg-white/10 hover:bg-white/20 border border-white/20 text-white/60 font-semibold px-5 py-2.5 rounded-xl text-sm transition-all"
-            >
-              Start Over
-            </button>
-          </div>
-
-          {/* How the number was reached — a stated method reads very
-              differently from an unexplained figure. */}
-          {valuation.compCount ? (
-            <p className="text-white/40 text-xs mt-3">
-              Based on {valuation.compCount} comparable {valuation.compCount === 1 ? "sale" : "sales"}
-              {valuation.compRadiusMiles ? ` within ${valuation.compRadiusMiles} miles` : ""}
-              {valuation.lookbackMonths ? `, closed in the last ${valuation.lookbackMonths} months` : ""}
-              , adjusted to your property.
-            </p>
-          ) : null}
-
-          {valuation.comps?.length ? <ComparableSales comps={valuation.comps} /> : null}
-
-          {/* Confirmation message — shown after request submitted */}
-          {emailSent && (
-            <div className="mt-3 bg-gold/10 border border-gold/30 rounded-xl px-4 py-3">
-              <p className="text-gold text-sm font-semibold">✓ Request received!</p>
-              <p className="text-white/60 text-xs mt-1">Candee will be in touch within 24 hours with your complimentary home valuation.</p>
-            </div>
           )}
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════
-          2. STAT ROW — 4 cards
-      ══════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {/* Property Value */}
-        <div className="glass rounded-2xl p-4 gold-border text-center">
-          <p className="text-white/40 text-xs uppercase tracking-wider mb-1">
-            Property Value
-          </p>
-          <p className="text-gold font-bold text-xl">{formatCurrency(valuation.estimate)}</p>
-          <p className="text-white/30 text-xs mt-0.5">
-            ± {formatCurrency(Math.round((valuation.high - valuation.low) / 2))}
-          </p>
-        </div>
-
-        {/* Price / SqFt where known, otherwise the county assessment — which
-            is the more interesting number anyway: it's what the property is
-            taxed on, and the gap to market value is the story. */}
-        <div className="glass rounded-2xl p-4 border border-white/10 text-center">
-          {pricePerSqft ? (
-            <>
-              <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Price / SqFt</p>
-              <p className="text-white font-bold text-xl">${pricePerSqft.toLocaleString()}</p>
-              <p className="text-white/30 text-xs mt-0.5">per sqft</p>
-            </>
-          ) : valuation.assessedValue ? (
-            <>
-              <p className="text-white/40 text-xs uppercase tracking-wider mb-1">County Assessment</p>
-              <p className="text-white font-bold text-xl">{formatCurrency(valuation.assessedValue)}</p>
-              <p className="text-white/30 text-xs mt-0.5">
-                {valuation.estimate > valuation.assessedValue ? "+" : ""}
-                {Math.round(((valuation.estimate - valuation.assessedValue) / valuation.assessedValue) * 100)}% vs estimate
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Price / SqFt</p>
-              <p className="text-white/40 font-bold text-xl">—</p>
-            </>
-          )}
-        </div>
-
-        {/* Est. Monthly Rent */}
-        <div className="glass rounded-2xl p-4 border border-white/10 text-center">
-          <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Est. Monthly Rent</p>
-          {suggestedRent ? (
-            <>
-              <p className="text-white font-bold text-xl">{formatCurrency(suggestedRent)}</p>
-              <p className="text-white/30 text-xs mt-0.5">
-                {valuation.rentZestimate ? "For this property" : "HUD area benchmark"}
-              </p>
-            </>
-          ) : (
-            <p className="text-white/40 font-bold text-xl">—</p>
-          )}
-        </div>
-
-        {/* Area Median Income */}
-        <div className="glass rounded-2xl p-4 border border-white/10 text-center">
-          <p className="text-white/40 text-xs uppercase tracking-wider mb-1">Area Median Income</p>
-          {valuation.areaMedianIncome ? (
-            <>
-              <p className="text-white font-bold text-xl">
-                {formatCurrency(valuation.areaMedianIncome)}
-              </p>
-              <p className="text-white/30 text-xs mt-0.5">household / yr</p>
-            </>
-          ) : (
-            <p className="text-white/40 font-bold text-xl">—</p>
-          )}
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════
-          3. TWO-COLUMN — Market Analysis + Property Details
-      ══════════════════════════════════════════════════════════════ */}
-      <div className="grid md:grid-cols-2 gap-4">
-        {/* LEFT: Market Analysis */}
-        <div className="glass rounded-2xl p-5 gold-border">
-          <h3 className="text-gold font-bold text-xs uppercase tracking-wider mb-4 flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" />
-            </svg>
-            Market Analysis
-          </h3>
-          <div className="space-y-0">
-            <Row label="Price Range" value={`${formatCurrency(valuation.low)} – ${formatCurrency(valuation.high)}`} />
-            <Row label="Confidence Level" value={<ConfidenceBadge confidence={valuation.confidence} />} />
-            {valuation.compCount ? (
-              <Row label="Comparable Sales" value={`${valuation.compCount} used`} />
-            ) : null}
-            {valuation.homeType && (
-              <Row label="Home Type" value={valuation.homeType.replace(/_/g, " ")} />
-            )}
-            {valuation.yearBuilt && (
-              <Row label="Year Built" value={String(valuation.yearBuilt)} last />
-            )}
-            {!valuation.yearBuilt && (
-              <Row label="Midpoint" value={formatCurrency(valuation.estimate)} last gold />
-            )}
-          </div>
-        </div>
-
-        {/* RIGHT: Property Details */}
-        <div className="glass rounded-2xl p-5 border border-white/10">
-          <h3 className="text-gold font-bold text-xs uppercase tracking-wider mb-4 flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-            Property Details
-          </h3>
-          <div className="space-y-0">
-            {valuation.beds && <Row label="Bedrooms" value={`${valuation.beds} beds`} />}
-            {valuation.baths && <Row label="Bathrooms" value={`${valuation.baths} baths`} />}
-            {valuation.sqft && (
-              <Row label="Living Area" value={`${valuation.sqft.toLocaleString()} sqft`} />
-            )}
-            {valuation.yearBuilt && (
-              <Row label="Year Built" value={String(valuation.yearBuilt)} />
-            )}
-            {valuation.assessedValue && (
-              <Row label="County Assessment" value={formatCurrency(valuation.assessedValue)} />
-            )}
-            {valuation.compRadiusMiles && (
-              <Row label="Search Radius" value={`${valuation.compRadiusMiles} miles`} />
-            )}
-            {valuation.lookbackMonths && (
-              <Row label="Sales Reviewed" value={`Last ${valuation.lookbackMonths} months`} />
-            )}
-            <Row label="Location" value={`${address.city}, ${address.state} ${address.zipCode}`} last />
-          </div>
-        </div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════
-          4. RENTAL MARKET ANALYSIS
-      ══════════════════════════════════════════════════════════════ */}
-      {/* Only rendered when a real rent figure exists — no static back-fill. */}
-      {suggestedRent !== null && (
-        <div className="glass rounded-2xl p-5 md:p-6 border border-white/10">
-          <h3 className="text-gold font-bold text-xs uppercase tracking-wider mb-5 flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
-            Rental Market Analysis
-          </h3>
-
-          <div className="bg-gold/10 border border-gold/30 rounded-xl p-4 flex items-center justify-between flex-wrap gap-3">
-            <div>
-              <p className="text-white/50 text-xs uppercase tracking-wider">Suggested Rent</p>
-              <p className="text-gold font-bold text-3xl mt-1">
-                {formatCurrency(suggestedRent)}
-                <span className="text-gold/50 text-base font-normal">/mo</span>
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-white/40 text-xs">Annual Gross</p>
-              <p className="text-white font-semibold">{formatCurrency(suggestedRent * 12)}</p>
-              <p className="text-white/30 text-xs mt-1">
-                ~{((suggestedRent * 12) / valuation.estimate * 100).toFixed(1)}% gross yield
-              </p>
-            </div>
-          </div>
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════
-          5. CTA SECTION
-      ══════════════════════════════════════════════════════════════ */}
-      <div className="rounded-2xl p-6 md:p-8 border-2 border-gold/40 bg-gradient-to-br from-gold/10 to-navy">
-        <p className="text-white font-bold text-xl mb-1 text-center md:text-left">
-          Want a precise valuation?
-        </p>
-        <p className="text-white/50 text-sm mb-6 text-center md:text-left">
-          A free CMA from Candee gives you an agent-prepared, market-specific value — often
-          $20k–$40k more accurate than automated tools. No pressure, no obligation.
-        </p>
+      <ComparableSales comps={valuation.comps ?? []} />
 
-        <div className="flex flex-col md:flex-row gap-5 md:gap-6 mb-6">
-          {/* Headshot */}
-          <div className="flex-shrink-0 flex justify-center md:block">
-            <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-gold/50">
-              <Image
-                src="/candee-headshot.png"
-                alt="Candee Currie"
-                fill
-                className="object-cover object-top"
-                sizes="80px"
+      {/* ── The record behind it ───────────────────────────────────── */}
+      <section className="mt-12 grid md:grid-cols-2 gap-8 md:gap-12">
+        <div>
+          <h2 className="font-serif text-2xl text-ink">Your property record</h2>
+          <dl className="mt-4">
+            {valuation.beds ? <Row label="Bedrooms" value={String(valuation.beds)} /> : null}
+            {valuation.baths ? <Row label="Bathrooms" value={String(valuation.baths)} /> : null}
+            {valuation.sqft ? (
+              <Row label="Living area" value={`${valuation.sqft.toLocaleString()} sqft`} />
+            ) : null}
+            {valuation.yearBuilt ? (
+              <Row label="Year built" value={String(valuation.yearBuilt)} />
+            ) : null}
+            {valuation.homeType ? (
+              <Row
+                label="Home type"
+                value={<span className="capitalize">{valuation.homeType.replace(/_/g, " ")}</span>}
               />
-            </div>
-          </div>
+            ) : null}
+            {valuation.assessedValue ? (
+              <Row
+                label="County assessment"
+                value={formatCurrency(valuation.assessedValue)}
+                note={`${
+                  valuation.estimate > valuation.assessedValue ? "+" : ""
+                }${Math.round(
+                  ((valuation.estimate - valuation.assessedValue) / valuation.assessedValue) * 100
+                )}% vs this estimate`}
+              />
+            ) : null}
+            {pricePerSqft ? (
+              <Row label="Price per sqft" value={`$${pricePerSqft.toLocaleString()}`} last />
+            ) : (
+              <Row
+                label="Location"
+                value={`${address.city}${address.city ? ", " : ""}${address.state} ${address.zipCode}`}
+                last
+              />
+            )}
+          </dl>
+        </div>
 
-          {/* Agent info */}
-          <div className="flex-1 text-center md:text-left">
-            <p className="text-gold/80 text-xs uppercase tracking-widest font-semibold mb-0.5">
-              Your Local Expert
+        <div>
+          <h2 className="font-serif text-2xl text-ink">Area context</h2>
+          <dl className="mt-4">
+            {valuation.compRadiusMiles ? (
+              <Row label="Search radius" value={`${valuation.compRadiusMiles} miles`} />
+            ) : null}
+            {valuation.lookbackMonths ? (
+              <Row label="Sales reviewed" value={`Last ${valuation.lookbackMonths} months`} />
+            ) : null}
+            {valuation.areaMedianIncome ? (
+              <Row
+                label="Area median income"
+                value={formatCurrency(valuation.areaMedianIncome)}
+                note="Household, per year"
+              />
+            ) : null}
+            {suggestedRent ? (
+              <Row
+                label="Estimated monthly rent"
+                value={formatCurrency(suggestedRent)}
+                note={
+                  valuation.rentZestimate
+                    ? `${((suggestedRent * 12) / valuation.estimate * 100).toFixed(1)}% gross yield, this property`
+                    : `${((suggestedRent * 12) / valuation.estimate * 100).toFixed(1)}% gross yield, HUD area benchmark`
+                }
+                last
+              />
+            ) : (
+              <Row
+                label="Records source"
+                value={jurisdictionLabel(valuation.sourceJurisdiction ?? valuation.source)}
+                last
+              />
+            )}
+          </dl>
+        </div>
+      </section>
+
+      {/* ── The agent ──────────────────────────────────────────────── */}
+      <section className="mt-12 pt-10 border-t border-rule">
+        <div className="grid sm:grid-cols-[auto_1fr] gap-6 items-start">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={agent.headshot}
+            alt={agent.name}
+            width={112}
+            height={112}
+            className="w-24 h-24 rounded-full object-cover object-top border border-rule"
+            onError={e => {
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+          <div>
+            <h2 className="font-serif text-2xl text-ink">Where this estimate is likely wrong</h2>
+            <p className="mt-3 text-[15px] leading-relaxed text-ink-muted max-w-2xl">
+              Public record does not know whether your kitchen was redone, how the light
+              falls, or what the lot backs onto — and those routinely move the number by
+              more than the band above. {agent.name} will walk the property, tell you which
+              of the sales above are genuinely comparable and which are not, and give you a
+              figure she would be willing to list at.
             </p>
-            <h3 className="text-white font-bold text-lg">Candee Currie</h3>
-            <p className="text-white/50 text-sm">TTR Sotheby&apos;s International Realty</p>
-            <p className="text-white/30 text-xs mt-0.5">VA License 0225203164</p>
-
-            <div className="flex flex-col sm:flex-row gap-3 mt-3 justify-center md:justify-start">
-              <a
-                href="tel:+17032036005"
-                className="flex items-center justify-center gap-2 text-white/60 hover:text-gold transition-colors text-sm"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.99 12 19.79 19.79 0 0 1 1.93 3.37 2 2 0 0 1 3.91 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                </svg>
-                (703) 203-6005
+            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-[15px]">
+              <a href={TEL} className="text-navy font-medium hover:underline">
+                {agent.phone}
               </a>
-              <a
-                href="mailto:ccurrie@ttrsir.com"
-                className="flex items-center justify-center gap-2 text-white/60 hover:text-gold transition-colors text-sm"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                  <polyline points="22,6 12,13 2,6" />
-                </svg>
-                ccurrie@ttrsir.com
+              <a href={`mailto:${agent.email}`} className="text-navy font-medium hover:underline">
+                {agent.email}
               </a>
             </div>
+            {/*
+              Brokerage sits WITH the licence, not only in the page footer.
+              VA, MD and DC advertising rules all require the brokerage's name
+              on agent-branded advertising, and this block is what a homeowner
+              screenshots and forwards.
+            */}
+            <p className="mt-3 text-sm text-ink-faint">
+              {agent.brokerage} · {agent.license}
+            </p>
           </div>
         </div>
+      </section>
 
-        <div className="flex flex-col sm:flex-row gap-3">
-          <a
-            href={CMA_URL}
-            className="flex-1 gold-gradient text-navy font-bold py-4 rounded-xl text-sm text-center transition-all hover:opacity-90 shadow-lg shadow-gold/20"
-          >
-            Request Free CMA →
-          </a>
-          <a
-            href="tel:+17032036005"
-            className="flex-1 bg-white/10 hover:bg-white/15 border border-white/20 text-white font-semibold py-4 rounded-xl text-sm text-center transition-all"
-          >
-            📞 Call Candee
-          </a>
-        </div>
+      <div className="mt-10 pt-6 border-t border-rule">
+        <button
+          onClick={onStartOver}
+          className="text-sm font-medium text-navy hover:underline"
+        >
+          Value another address
+        </button>
       </div>
-
-      {/* Disclaimer */}
-      <p className="text-white/20 text-xs text-center max-w-lg mx-auto pb-4">
-        This estimate is generated from publicly available data and is not a formal appraisal.
-        Actual market value may vary. All data deemed reliable but not guaranteed.
-      </p>
     </div>
   );
 }
@@ -587,24 +557,33 @@ function FullResults({
 function Row({
   label,
   value,
+  note,
   last = false,
-  gold = false,
 }: {
   label: string;
   value: React.ReactNode;
+  note?: string;
   last?: boolean;
-  gold?: boolean;
 }) {
   return (
     <div
-      className={`flex justify-between items-center py-2.5 ${
-        last ? "" : "border-b border-white/10"
+      // flex-wrap, so a long value ("$1,447,392 – $2,456,372") drops to its own
+      // line on a narrow screen rather than running past the container edge.
+      className={`flex flex-wrap justify-between items-baseline gap-x-6 gap-y-1 py-3 ${
+        last ? "" : "border-b border-rule"
       }`}
     >
-      <span className="text-white/50 text-sm">{label}</span>
-      <span className={`font-semibold text-sm ${gold ? "text-gold" : "text-white"}`}>
-        {value}
-      </span>
+      <dt className="text-[15px] text-ink-muted">{label}</dt>
+      <dd className="text-right">
+        {/*
+          NOT `capitalize`. That class title-cases every word, which turned
+          "1.23 miles" into "1.23 Miles" and "last 12 months" into
+          "Last 12 Months". Values that need casing fixed do it at the call
+          site, where only that one value is affected.
+        */}
+        <span className="text-[15px] text-ink font-medium tnum">{value}</span>
+        {note && <span className="block text-[13px] text-ink-faint tnum">{note}</span>}
+      </dd>
     </div>
   );
 }

@@ -23,12 +23,12 @@
  *
  * SERVING IS SEPARATE FROM INGESTING, deliberately. Rows land in the table and
  * are read only if their jurisdiction appears in `DEFAULT_JURISDICTIONS` in
- * lib/comps/providers/postgres.ts. "arlington" and "loudoun" are listed, so a
- * completed ingest goes live; anything else you load — a scratch county, a
- * half-validated pull — stays unserved until it is named there.
+ * lib/comps/providers/postgres.ts. NO TitlePro247 jurisdiction is listed
+ * there: the subscription is licensed for title production, and whether it may
+ * be served through a consumer product is an open question.
  *
- * That separation is what lets an ingest be checked before it reaches a
- * homeowner. Use --dry-run first; a bad load is far easier to avoid than to
+ * So an ingest can be run, inspected and backtested without publishing
+ * anything. Use --dry-run first; a bad load is far easier to avoid than to
  * notice afterwards.
  *
  * --dry-run does everything except write, and prints the same report. Run it

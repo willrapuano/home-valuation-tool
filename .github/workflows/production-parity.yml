@@ -1,0 +1,37 @@
+name: production parity
+
+# Runs after every push to main (i.e. after every merge) and daily.
+#
+# The push trigger is the one that matters: it turns "did the deployment
+# actually happen" from something a human remembers to check into something
+# that fails red. Measured 2026-07-30, the live site ran eight commits behind
+# for an entire working session because a pull request was open and nothing
+# asked production what it was serving.
+#
+# The schedule catches the other direction — a deployment rolled back, an
+# environment variable cleared in the dashboard, a tenant's branding unset.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The script compares against origin/main, so it needs the ref.
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      # Vercel builds after the push lands, so give it room before failing.
+      - name: Check the deployed commit matches main
+        env:
+          PARITY_URL: ${{ vars.PARITY_URL || 'https://home-valuation-tool.vercel.app' }}
+          PARITY_ATTEMPTS: "8"
+        run: npx tsx scripts/production-parity.ts "$PARITY_URL" "${{ github.sha }}"
