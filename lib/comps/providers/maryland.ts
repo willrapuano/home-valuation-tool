@@ -1,5 +1,6 @@
 import { ComparableSale, CompsProvider, Condition, LatLng, PropertyType, SubjectLookup, SubjectProperty } from "../types";
 import { EsriFeature, esriQuery as sharedEsriQuery } from "./esri";
+import { haversineMiles } from "../geo";
 
 /**
  * Maryland STATEWIDE comparable sales provider.
@@ -44,21 +45,36 @@ const HEDGE_AFTER_MS = 2_500;
 const MAX_RECORDS = 2000;
 /** Widest search for the subject parcel, in miles. */
 /**
- * Subject lookup widens only when containment finds nothing; 0 means "the
- * parcel containing this point". See lookupSubject for why that must come
- * first — a plain radius query returns an arbitrary page of neighbours and
- * silently describes the wrong house.
+ * ONE query, at a radius — NOT a containment query.
+ *
+ * MD_PropertyData layer 0 is "Parcel Points": point geometry, not polygons.
+ * A containment query against points matches only exact coordinate
+ * coincidence, so `esriSpatialRelIntersects` with no `distance` cannot use the
+ * index and the service scans. Measured back to back on the same point: the
+ * radius query below returns in 620ms, the containment form TIMED OUT at 30s.
+ *
+ * That is a regression this file carried briefly, from applying DC's
+ * containment-first fix here without checking that DC's layer is polygons and
+ * this one is not. Every Maryland valuation was paying the provider's full 8s
+ * timeout on a query that could never succeed, before falling through.
  */
-const SUBJECT_SEARCH_LADDER = [0, 0.1];
-/*
- * TWO RUNGS, NOT FOUR. Each rung is a sequential round trip against a service
- * that is occasionally slow, and the route's whole budget is 20s. A four-rung
- * ladder measured 12.1s in Frederick and timed out entirely in Silver Spring —
- * trading a wrong answer for no answer. Containment plus one widened fallback
- * keeps the correctness that matters and bounds the cost at two queries.
- */
-/** Enough that a widened rung ranks the true nearest parcel, not a page of 40. */
+const SUBJECT_SEARCH_MILES = 0.1;
+/** Enough to rank the true nearest parcel, not an arbitrary page of 40. */
 const SUBJECT_SEARCH_RECORDS = 1000;
+/**
+ * How close a parcel point must be to count as "this is the house".
+ *
+ * Containment is not expressible against a point layer, so proximity stands in
+ * for it. Measured against Census-geocoded Maryland addresses: a good geocode
+ * puts the parcel point 0ft away and the next parcel 99ft away, while a
+ * geocode that landed between properties put the nearest at 59ft — and that
+ * nearest was a DIFFERENT address. 26ft separates those cases and errs toward
+ * declining to claim knowledge.
+ *
+ * Below this the subject's characteristics are published; above it they are
+ * not. See SubjectLookup.exactParcel.
+ */
+const EXACT_MATCH_MILES = 0.005;
 /**
  * Containment returns the one or two parcels under the point, so it needs no
  * large page — and asking for one costs time on a slow service.
@@ -322,7 +338,6 @@ export class MarylandProvider implements CompsProvider {
   async lookupSubject(
     location: LatLng
   ): Promise<SubjectLookup | null> {
-    for (const distanceMiles of SUBJECT_SEARCH_LADDER) {
     const features = await esriQuery(PARCEL_LAYER, {
       geometry: JSON.stringify({
         x: location.lng,
@@ -330,9 +345,8 @@ export class MarylandProvider implements CompsProvider {
         spatialReference: { wkid: 4326 },
       }),
       geometryType: "esriGeometryPoint",
-      ...(distanceMiles > 0
-        ? { distance: String(distanceMiles), units: "esriSRUnit_StatuteMile" }
-        : {}),
+      distance: String(SUBJECT_SEARCH_MILES),
+      units: "esriSRUnit_StatuteMile",
       spatialRel: "esriSpatialRelIntersects",
       inSR: "4326",
       outSR: "4326",
@@ -346,41 +360,38 @@ export class MarylandProvider implements CompsProvider {
       outFields:
         "ACCTID,ADDRESS,SQFTSTRC,YEARBLT,ACRES,SUBDIVSN,STRUGRAD,LU,ZIPCODE,TRADATE,CONSIDR1,NFMTTLVL",
       returnGeometry: "true",
-      resultRecordCount: String(distanceMiles > 0 ? SUBJECT_SEARCH_RECORDS : CONTAINMENT_RECORDS),
+      resultRecordCount: String(SUBJECT_SEARCH_RECORDS),
     });
 
     assertFields(features, PARCEL_FIELDS, "MD_PropertyData");
 
+    // Nearest, out of everything in the radius — not the first of an arbitrary
+    // page of 40, which is what this used to take.
     let best: EsriFeature | undefined;
-    let bestDistance = Infinity;
+    let bestMiles = Infinity;
     for (const f of features) {
       const x = f.geometry?.x;
       const y = f.geometry?.y;
       if (x === undefined || y === undefined) continue;
       // Skip commercial and industrial neighbours; we want the house.
       if (!LAND_USE[str(f.attributes?.LU)?.toUpperCase() ?? ""]) continue;
-      // Squared degrees is enough to rank candidates within a tenth of a mile.
-      const d = (x - location.lng) ** 2 + (y - location.lat) ** 2;
-      if (d < bestDistance) {
-        bestDistance = d;
+      const miles = haversineMiles(location, { lat: y, lng: x });
+      if (miles < bestMiles) {
+        bestMiles = miles;
         best = f;
       }
     }
 
     const a = best?.attributes;
-    if (!a) continue;
+    if (!a) return null;
 
     return {
       location,
       ...characteristics(a),
       lastSalePrice: num(a.CONSIDR1),
       lastSaleDate: parseMdDate(a.TRADATE),
-      // Only the containment rung describes the requested home; a widened
-      // rung found a neighbour, which is fine for picking comps and wrong to
-      // print back as facts about this house.
-      exactParcel: distanceMiles === 0,
+      // Proximity stands in for containment; see EXACT_MATCH_MILES.
+      exactParcel: bestMiles <= EXACT_MATCH_MILES,
     };
-    }
-    return null;
   }
 }

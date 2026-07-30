@@ -49,15 +49,20 @@ afterEach(() => {
 
 const AT = { lat: 38.887, lng: -76.993 };
 
+/**
+ * Containment-first applies to the POLYGON layers only.
+ *
+ * Maryland's is a point layer and gets its own contract below — applying this
+ * one to it was a real regression, covered there.
+ */
 describe.each([
   ["DC", () => new DcProvider()],
-  ["Maryland", () => new MarylandProvider()],
-  // Fairfax kept a four-rung ladder and `resultRecordCount: 1` after the other
-  // two were fixed — so its widened rung took an ARBITRARY parcel, not the
-  // nearest. Measured live: in McLean that picked a parcel 349 feet further
-  // away assessed at $7,626,500 against the correct $2,496,110. Fairfax
-  // publishes no characteristics, so the subject is nothing but that
-  // assessment and the estimate was simply 3x wrong.
+  // Fairfax kept a four-rung ladder and `resultRecordCount: 1` after DC was
+  // fixed — so its widened rung took an ARBITRARY parcel, not the nearest.
+  // Measured live: in McLean that picked a parcel 349 feet further away
+  // assessed at $7,626,500 against the correct $2,496,110. Fairfax publishes
+  // no characteristics, so the subject is nothing but that assessment and the
+  // estimate was simply 3x wrong.
   ["Fairfax", () => new FairfaxCountyProvider()],
 ])("%s subject lookup", (_name, make) => {
   it("asks for the containing parcel before widening", async () => {
@@ -161,5 +166,51 @@ describe("exactParcel — the flag that decides what may be SHOWN", () => {
     expect(got!.sqft).toBe(2100);
     // But it must never claim to be the home the visitor asked about.
     expect(got!.exactParcel).toBe(false);
+  });
+});
+
+describe("Maryland subject lookup — a POINT layer, not polygons", () => {
+  /**
+   * MD_PropertyData layer 0 is "Parcel Points". A containment query against
+   * point geometry matches only exact coordinate coincidence, so
+   * `esriSpatialRelIntersects` with no `distance` cannot use the index and the
+   * service scans.
+   *
+   * This file briefly carried DC's containment-first fix applied here without
+   * checking that. Measured back to back on the same point: the radius form
+   * returned in 620ms, the containment form TIMED OUT at 30s. Every Maryland
+   * valuation was paying the provider's full 8s timeout on a query that could
+   * never succeed, before falling through to the query that works.
+   */
+  it("uses a radius query, never a bare containment query", async () => {
+    await new MarylandProvider().lookupSubject(AT);
+
+    const spatial = calls.filter(c => c.params.geometryType === "esriGeometryPoint");
+    expect(spatial.length).toBeGreaterThan(0);
+    for (const c of spatial) {
+      // The absence of `distance` is the pathological form.
+      expect(Number(c.params.distance)).toBeGreaterThan(0);
+    }
+  });
+
+  it("costs exactly one round trip", async () => {
+    // No ladder: there is nothing to fall back FROM, so a second query would
+    // be pure latency on a service that is already the slowest of the three.
+    await new MarylandProvider().lookupSubject(AT);
+
+    const spatial = calls.filter(c => c.params.geometryType === "esriGeometryPoint");
+    expect(spatial).toHaveLength(1);
+  });
+
+  it("requests enough records to rank the true nearest", async () => {
+    // The original defect: a page of 40 out of 59 parcels within 0.1 miles,
+    // then take whichever came first.
+    await new MarylandProvider().lookupSubject(AT);
+    expect(Number(calls[0].params.resultRecordCount)).toBeGreaterThanOrEqual(500);
+  });
+
+  it("asks for geometry, since distance is the whole selection rule", async () => {
+    await new MarylandProvider().lookupSubject(AT);
+    expect(calls[0].params.returnGeometry).toBe("true");
   });
 });

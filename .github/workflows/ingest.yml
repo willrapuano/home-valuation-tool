@@ -1,0 +1,104 @@
+name: Ingest public records
+
+# The datastore was written, wired in behind `hasDatabase()`, and then never
+# ran. A database was provisioned, DATABASE_URL was set, and nothing ever
+# populated the table — so `PostgresProvider` returned no rows, every valuation
+# fell through to the live ArcGIS services, and the whole thing looked
+# configured while doing nothing.
+#
+# THIS IS WHERE THE INGEST BELONGS, not in a Vercel function. A statewide
+# Maryland walk is thousands of tiled queries; the route's budget is 20 seconds.
+# Actions allows six hours, holds the secret, and retries are free.
+#
+# Safe to run against a live database: rows upsert on their natural key
+# (jurisdiction, parcel_id, sold_date), the schema applies itself when absent,
+# and a failed tile is logged and skipped rather than aborting the run.
+
+on:
+  schedule:
+    # 08:00 UTC daily — before the Northern Virginia morning, after the
+    # counties have posted the previous day.
+    - cron: "0 8 * * *"
+    # Maryland is statewide and long, so it runs weekly instead. 04:00 Sunday.
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      jurisdictions:
+        description: "Space-separated: dc fairfax maryland. Blank = the schedule's default."
+        required: false
+        default: ""
+
+concurrency:
+  # Two ingests writing the same rows is safe but pointless, and it doubles the
+  # load we put on services that are not ours.
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    # Maryland statewide is the long pole. Well inside the 6h ceiling, and far
+    # enough above a normal run that hitting it means something is wrong.
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Without a database this workflow has nothing to do. That is a valid
+      # deployment state — the tool queries the live sources and works — so it
+      # exits green with an explanation rather than failing every night.
+      - name: Check the datastore is configured
+        id: check
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DATABASE_URL is not set. Skipping — the tool serves from the live public-records providers, which is a supported configuration. Set the DATABASE_URL repository secret to enable the datastore."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Which jurisdictions this run covers. Maryland is statewide and changes
+      # slowly — it publishes ~90 days behind — so a nightly walk of it would
+      # be thousands of queries against iMAP for data that has not moved.
+      - name: Decide what to ingest
+        id: plan
+        run: |
+          if [ -n "${{ github.event.inputs.jurisdictions }}" ]; then
+            TARGETS="${{ github.event.inputs.jurisdictions }}"
+          elif [ "${{ github.event.schedule }}" = "0 4 * * 0" ]; then
+            TARGETS="maryland"
+          else
+            TARGETS="dc fairfax"
+          fi
+          echo "targets=$TARGETS" >> "$GITHUB_OUTPUT"
+          echo "::notice::Ingesting: $TARGETS"
+
+      - name: Ingest
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          for j in ${{ steps.plan.outputs.targets }}; do
+            echo "::group::$j"
+            # One jurisdiction failing must not stop the others: a bad night
+            # for iMAP should not also cost us DC and Fairfax.
+            npx tsx scripts/ingest.ts "$j" --months 24 || echo "::warning::$j ingest failed"
+            echo "::endgroup::"
+          done
+
+      # An ingest that silently wrote a third of the sales still produces
+      # confident-looking valuations. Say what actually landed.
+      - name: Report what is in the table
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/ingest-status.ts

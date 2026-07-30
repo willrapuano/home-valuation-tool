@@ -117,12 +117,30 @@ the datastore, those two counties simply cannot be served.
 | Tiled, idempotent, resumable ingest | **done** — `scripts/ingest.ts` |
 | Wired into `COVERAGE`, first, behind `hasDatabase()` | **done** |
 | Freshness in `/api/health` | **done** |
-| **Provision the database** | **needs a human** |
+| Scheduled ingest | **done** — `.github/workflows/ingest.yml` |
+| Freshness report after each run | **done** — `scripts/ingest-status.ts` |
+| **Set the DATABASE_URL repository secret** | **needs a human** |
 | **Backtest the ingested data** | blocked on the above |
 
 With no `DATABASE_URL` the provider is skipped entirely and the tool behaves
 exactly as it does today — the database is an accelerator, not a new hard
-dependency.
+dependency. The ingest workflow checks for the secret and exits green with a
+notice rather than failing nightly.
+
+### Why the ingest runs in Actions and not in a Vercel function
+
+A statewide Maryland walk is thousands of tiled queries. The route's budget is
+20 seconds; Actions allows six hours, holds the secret, and retries are free.
+DC and Fairfax run nightly; Maryland runs weekly, because it publishes about 90
+days behind and a nightly statewide walk would be thousands of requests against
+iMAP for data that has not moved.
+
+**It was never scheduled before.** The datastore was written, wired in behind
+`hasDatabase()`, and then never ran: a database was provisioned, `DATABASE_URL`
+was set, and nothing populated the table. `PostgresProvider` returned no rows,
+every valuation fell through to the live services, and the whole thing looked
+configured while doing nothing. `scripts/ingest-status.ts` runs after each
+ingest and fails loudly on an empty table, which is what would have caught it.
 
 ### To turn it on
 
