@@ -280,19 +280,35 @@ way Maryland actually works:
 npx tsx scripts/production-path-backtest.ts 25 90
 ```
 
-| jurisdiction | paired | record subj | live subj | published | **MdAPE shown** |
-|---|---|---|---|---|---|
-| dc | 37 | 5.1% | 4.5% | 90% | **4.5%** |
-| maryland | 44 | 8.6% | 10.3% | 67% | **11.7%** |
+| run | jurisdiction | paired | record subj | live subj | published | **MdAPE shown** |
+|---|---|---|---|---|---|---|
+| A | dc | 37 | 5.1% | 4.5% | 90% | **4.5%** |
+| A | maryland | 44 | 8.6% | 10.3% | 67% | **11.7%** |
+| B | dc | 36 | 5.7% | 5.7% | 85% | **5.2%** |
+| B | maryland | 36 | 6.8% | 8.2% | 69% | **10.1%** |
+| B | fairfax | 49 | 6.7% | 6.7% | 96% | **6.6%** |
 
-**Maryland is 11.7%, not 6.6%.** It ships — a wide measured band beats a blank —
-carrying the condition it was measured under: *"half of estimates in Maryland
-land within 11.7% of the sale price, measured under Maryland's ~3-month
-reporting lag."* Without that qualifier the number reads as the engine being bad
-at Maryland houses rather than working from records a quarter old.
+**Maryland is 10–12%, not 6.6%.** Two runs at n≈40 gave 11.7% and 10.1%; the
+higher ships, because they straddle about ±1pp of sampling noise and every
+figure here is a floor (see below). It carries the condition it was measured
+under: *"half of estimates in Maryland land within 11.7% of the sale price,
+measured under Maryland's ~3-month reporting lag."* Without that qualifier the
+number reads as the engine being bad at Maryland houses rather than working from
+records a quarter old.
 
-DC at the same 90-day cutoff shows 4.5% against 4.7% unlagged — flat, which is
-the expected control for a jurisdiction publishing within ~10 days.
+**DC is the control and it behaves.** 4.5% and 5.2% under a 90-day cutoff
+against 4.7% unlagged — flat, as expected for a jurisdiction publishing within
+~10 days. A harness that moved DC would be measuring itself, not the lag.
+
+**Fairfax under the same lag is 6.6%, better than the 7.5% displayed.** Its
+valuations rest on assessed value, and an assessment does not go stale the way a
+comp does. The conservative figure is kept.
+
+Every displayed figure carries `measuredUnderLagDays` and `sampleSize`
+structurally, and a test asserts that any figure measured under a nonzero lag
+also carries a user-visible `qualifier` — so a lagged number cannot be shown
+bare. That check used to grep the `basis` prose for "cutoff" and broke the
+moment DC's basis mentioned its control run.
 
 **There is no pooled headline figure any more.** The old "6.1% across eight
 markets" averaged jurisdictions with different publishing lags, and included
@@ -300,7 +316,27 @@ Maryland at its optimistic 6.6%. An average across counties that publish at
 different speeds is not a quantity anyone receives. The per-jurisdiction table
 is the claim.
 
-**`scripts/lag-cost.ts` was audited for the obvious leak** and is clean: it calls
+**Every figure here is a floor.** One leak is shared by every backtest in this
+repository and cannot be closed with the data available: the subject's
+`assessedValue` is the *current* assessment, and assessments chase sales. A
+holdout that sold in March may already have been reassessed to reflect that
+sale. A live visitor's future sale cannot flatter their assessment the same way.
+The leak is uniform across cutoffs, so *differences* stay clean — the lag cost,
+the engine-vs-product gap, the effect of a filter — but *levels* are optimistic.
+
+It bites hardest where the assessment **is** the subject: Fairfax publishes no
+living area, beds or year built, so its valuations rest almost entirely on
+assessed value. DC and Maryland at least carry physical characteristics
+alongside it, and Maryland reassesses triennially rather than annually, so its
+assessments are on average staler and *less* able to encode a recent sale.
+
+The out-of-time test closes this axis by construction: subjects that sell
+*after* the assessments used to value them cannot leak. Once this autumn's
+transfers publish — late October for Maryland — that run is not confirmation,
+it is the first leak-free measurement, and it says how much of a floor these
+numbers are.
+
+**`scripts/lag-cost.ts` was audited for the other obvious leak** and is clean: it calls
 `valueFromComps` with only `asOf` and `maxAssessmentRatioDeviation`, never a
 `market` override, so `calibrateMarket` refits `annualAppreciation` on the
 cut-off candidate set every iteration. The rate does not peek at the future. One
@@ -311,7 +347,18 @@ is the current assessment — but it is identical at every cutoff, so the
 `JURISDICTION_ACCURACY` is keyed by **provider slug**, not market key. Every
 Maryland county is served by the one Maryland provider and reports `maryland`,
 so adding counties to `lib/markets.ts` cannot mint per-county accuracy claims
-that were never measured. A test asserts that cross-product stays empty.
+that were never measured. A test asserts that cross-product stays empty, and another asserts every
+displayed figure's `basis` names the production path — an engine-path number in
+a production-path slot is exactly the substitution `displayable` exists to
+prevent.
+
+**A market that contributes nothing now says so.** `production-path-backtest.ts`
+prints a `WHERE THE SAMPLE WENT` table covering every market it was asked for,
+with pool / usable / testable / sampled / rows / no-comps counts, and marks any
+that produced zero rows. A jurisdiction with no rows prints
+`contributed NOTHING` with the reason instead of being skipped by the summary
+loop. That omission is how a run reported DC and Maryland while quietly not
+mentioning Fairfax at all.
 
 #### The Maryland lag is structural, not an ingest problem
 

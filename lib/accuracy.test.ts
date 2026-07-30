@@ -104,6 +104,20 @@ describe("accuracyLine", () => {
     expect(line).toContain("11.7%");
     expect(line).toContain("reporting lag");
     expect(JURISDICTION_ACCURACY.maryland.pct).toBe(11.7);
+    expect(JURISDICTION_ACCURACY.maryland.measuredUnderLagDays).toBe(90);
+  });
+
+  /**
+   * Fairfax's figure must come from the production-path run, not from
+   * lag-cost.ts — that script measures the ENGINE path, and slotting an
+   * engine-path number into a production-path claim is exactly the
+   * substitution `displayable` exists to prevent.
+   */
+  it("does not source a jurisdiction's figure from the engine path", () => {
+    for (const figure of Object.values(JURISDICTION_ACCURACY)) {
+      if (!figure.displayable) continue;
+      expect(figure.basis).toContain("production-path");
+    }
   });
 
   /** The stale figure must not come back. 6.6% was the pre-lag measurement. */
@@ -143,9 +157,15 @@ describe("accuracyLine", () => {
     for (const [key, figure] of Object.entries(JURISDICTION_ACCURACY)) {
       expect(figure.basis.length).toBeGreaterThan(20);
       expect(key).toBe(key.toLowerCase());
-      // A figure measured under an unusual condition must say so on screen,
-      // not only in the basis string a homeowner never sees.
-      if (figure.basis.includes("cutoff")) expect(figure.qualifier).toBeTruthy();
+      // A figure measured under a simulated lag must say so ON SCREEN, not
+      // only in a basis string no homeowner reads. Structural, not a substring
+      // search of the prose — the earlier version grepped `basis` for "cutoff"
+      // and broke as soon as DC's basis mentioned its control run.
+      if (figure.measuredUnderLagDays > 0) expect(figure.qualifier).toBeTruthy();
+      expect(figure.measuredUnderLagDays).toBeGreaterThanOrEqual(0);
+      // A percentage quoted to one decimal on a handful of holdouts is the
+      // same false precision the headline figure was rounded to avoid.
+      expect(figure.sampleSize).toBeGreaterThanOrEqual(30);
     }
   });
 });

@@ -153,11 +153,44 @@ interface Row {
   exact: boolean;
 }
 
+/**
+ * Why a market produced nothing.
+ *
+ * A market that contributes zero rows used to vanish: the pool fetch printed to
+ * stderr and moved on, subjects short of comps were skipped by a bare
+ * `continue`, and the summary omitted any jurisdiction with no rows. A run could
+ * therefore report "dc" and "maryland" and simply not mention that Fairfax —
+ * the flagship county — had been sampled and yielded nothing. Silence reading
+ * as absence is this codebase's signature failure; it is what let DC value the
+ * wrong parcel for weeks.
+ */
+interface MarketOutcome {
+  jurisdiction: string;
+  market: string;
+  pool: number;
+  usable: number;
+  testable: number;
+  sampled: number;
+  rows: number;
+  /** Set when the market could not be sampled at all. */
+  failure?: string;
+  /** Subjects dropped because too few comps survived the holdout and lag. */
+  tooFewComps: number;
+}
+
 async function main() {
   const rows: Row[] = [];
+  const outcomes: MarketOutcome[] = [];
   let attempted = 0;
 
   for (const m of MARKETS) {
+    const outcome: MarketOutcome = {
+      jurisdiction: m.jurisdiction,
+      market: m.name,
+      pool: 0, usable: 0, testable: 0, sampled: 0, rows: 0, tooFewComps: 0,
+    };
+    outcomes.push(outcome);
+
     let pool: ComparableSale[];
     try {
       pool = await m.provider().fetchCandidates(
@@ -165,9 +198,11 @@ async function main() {
         { radiusMiles: 2.5, lookbackMonths: LOOKBACK_MONTHS, limit: 2000 }
       );
     } catch (err) {
-      console.error(`  ${m.jurisdiction}/${m.name}: pool fetch failed — ${(err as Error)?.message}`);
+      outcome.failure = `pool fetch failed — ${(err as Error)?.message}`;
+      console.error(`  ${m.jurisdiction}/${m.name}: ${outcome.failure}`);
       continue;
     }
+    outcome.pool = pool.length;
 
     const usable = pool.filter(
       c => c.assessedValue && c.assessedValue > 0 && c.propertyType !== "other" && c.propertyType !== "land"
@@ -175,6 +210,9 @@ async function main() {
     const testable = m.assessmentDate ? usable.filter(c => c.soldDate > m.assessmentDate!) : usable;
     const step = Math.max(1, Math.floor(testable.length / N));
     const subs = testable.filter((_, i) => i % step === 0).slice(0, N);
+    outcome.usable = usable.length;
+    outcome.testable = testable.length;
+    outcome.sampled = subs.length;
 
     let done = 0;
     for (const s of subs) {
@@ -188,7 +226,13 @@ async function main() {
         // Mirror the route's fetch cap, which takes the most recent.
         .sort((a, b) => (a.soldDate < b.soldDate ? 1 : -1))
         .slice(0, CANDIDATE_LIMIT);
-      if (candidates.length < 10) continue;
+      if (candidates.length < 10) {
+        // Counted, not swallowed. At a 90-day lag this is the dominant reason a
+        // market thins out, and a run that hides it looks like a market that
+        // was never tried.
+        outcome.tooFewComps++;
+        continue;
+      }
 
       const base = { asOf: dayBefore(s.soldDate), ...(m.engineOptions ?? {}) };
       const row: Row = {
@@ -265,6 +309,7 @@ async function main() {
       rows.push(row);
       done++;
     }
+    outcome.rows = done;
     process.stdout.write(`  ${m.jurisdiction}/${m.name}: ${done} subjects\n`);
   }
 
@@ -273,7 +318,8 @@ async function main() {
     process.exit(1);
   }
 
-  const JURS = ["dc", "maryland", "fairfax"];
+  // Every jurisdiction that was ASKED FOR, not just the ones that answered.
+  const JURS = [...new Set(MARKETS.map(m => m.jurisdiction))];
 
   console.log(`\n${"═".repeat(100)}`);
   console.log("PUBLISHED FIGURE vs WHAT PRODUCTION DELIVERS");
@@ -287,7 +333,16 @@ async function main() {
 
   for (const j of [...JURS, "ALL"]) {
     const r = j === "ALL" ? rows : rows.filter(x => x.jurisdiction === j);
-    if (!r.length) continue;
+    if (!r.length) {
+      // PRINTED, NOT SKIPPED. `continue` here is how a jurisdiction disappears
+      // from its own accuracy report.
+      const why = outcomes
+        .filter(o => o.jurisdiction === j)
+        .map(o => o.failure ?? `${o.tooFewComps} of ${o.sampled} lacked comps`)
+        .join("; ");
+      console.log(`  ${j.padEnd(13)}${"0".padStart(4)}   — contributed NOTHING: ${why}`);
+      continue;
+    }
     // PAIRED ONLY. Taking each median over whatever that column happened to
     // produce compares different subsets of properties and reports the
     // difference as a gap — the same survivorship error that made a tight
@@ -310,6 +365,28 @@ async function main() {
         `${`${shown.toFixed(1)}%`.padStart(13)}` +
         `${pct(r.filter(x => x.exact).length, r.length).padStart(8)}` +
         `${pct(r.filter(x => x.upstreamError).length, r.length).padStart(10)}`
+    );
+  }
+
+  console.log(`\n${"═".repeat(100)}`);
+  console.log("WHERE THE SAMPLE WENT  — every market asked for, including the ones that gave nothing");
+  console.log("═".repeat(100));
+  console.log(
+    `  ${"market".padEnd(26)}${"pool".padStart(7)}${"usable".padStart(8)}` +
+      `${"testable".padStart(10)}${"sampled".padStart(9)}${"rows".padStart(7)}${"no comps".padStart(10)}`
+  );
+  console.log("  " + "─".repeat(96));
+  for (const o of outcomes) {
+    const name = `${o.jurisdiction}/${o.market}`;
+    if (o.failure) {
+      console.log(`  ${name.padEnd(26)}${"FAILED".padStart(7)}   ${o.failure}`);
+      continue;
+    }
+    console.log(
+      `  ${name.padEnd(26)}${String(o.pool).padStart(7)}${String(o.usable).padStart(8)}` +
+        `${String(o.testable).padStart(10)}${String(o.sampled).padStart(9)}` +
+        `${String(o.rows).padStart(7)}${String(o.tooFewComps).padStart(10)}` +
+        (o.rows === 0 ? "   ← CONTRIBUTED NOTHING" : "")
     );
   }
 

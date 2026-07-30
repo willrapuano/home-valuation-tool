@@ -54,6 +54,34 @@
  * WHEN A FIGURE IS STILL WITHHELD, the UI shows the data's recency instead —
  * see `recencyLine`. That path remains live for any jurisdiction added without
  * a measurement.
+ *
+ * ── EVERY FIGURE HERE IS A FLOOR ─────────────────────────────────────────
+ *
+ * One leak is shared by every backtest in this repository and cannot be closed
+ * with the data available: the subject's `assessedValue` is the CURRENT
+ * assessment. Assessments chase sales. A holdout that sold in March may already
+ * have been reassessed to reflect that sale, so the engine is handed a number
+ * partly derived from the answer. A live visitor's future sale cannot flatter
+ * their assessment the same way.
+ *
+ * The leak is uniform across cutoffs, so DIFFERENCES stay clean — the lag cost,
+ * the engine-vs-product gap, the effect of a filter. LEVELS are optimistic.
+ * Treat 4.7 / 7.5 / 11.7 as floors, not as point estimates.
+ *
+ * IT BITES HARDEST WHERE THE ASSESSMENT IS THE SUBJECT. Fairfax publishes no
+ * living area, beds or year built, so its valuations rest almost entirely on
+ * assessed value — the one input most contaminated. DC and Maryland at least
+ * carry physical characteristics alongside it. Reassessment cadence compounds
+ * this: DC and Fairfax reassess annually, Maryland every three years, so a
+ * Maryland assessment is on average staler and therefore LESS able to encode a
+ * recent sale.
+ *
+ * THE OUT-OF-TIME TEST CLOSES IT. Subjects that sell AFTER the assessments used
+ * to value them cannot leak, by construction. Once this autumn's transfers
+ * publish — around late October for Maryland — re-running with those as
+ * holdouts is not merely confirmation of the figures above; it is the first
+ * measurement free of this leak, and the one that says how much of a floor
+ * these numbers are.
  */
 
 /** Pooled figure across every measured market. See production-path-backtest.ts. */
@@ -78,6 +106,25 @@ export interface AccuracyFigure {
   /** Why, in one line, for whoever changes this next. */
   basis: string;
   /**
+   * Comp cutoff the figure was measured under, in days — the publishing lag
+   * simulated during the backtest.
+   *
+   * Structural rather than prose. A test asserts that any figure measured under
+   * a nonzero lag also carries a `qualifier`, so a lagged number cannot be
+   * displayed bare. Grepping `basis` for the word "cutoff" was the earlier
+   * check, and it broke the moment DC's basis mentioned a control run.
+   */
+  measuredUnderLagDays: number;
+  /**
+   * Paired holdouts behind the figure.
+   *
+   * Present so the precision of the claim is legible. Two independent runs at
+   * n≈40 put Maryland at 11.7% and 10.1%, and DC at 4.5% and 5.2% — about ±1pp
+   * of run-to-run noise. The displayed figures sit at or above that range
+   * deliberately; see the floor note above.
+   */
+  sampleSize: number;
+  /**
    * Appended to the displayed sentence where the figure was measured under a
    * condition a reader should know about.
    *
@@ -100,18 +147,26 @@ export const JURISDICTION_ACCURACY: Record<string, AccuracyFigure> = {
   dc: {
     pct: 4.7,
     displayable: true,
-    basis: "production-path backtest; DC publishes within ~10 days so backtest conditions match production",
+    basis:
+      "production-path backtest, 124-holdout run, 'error of what is shown' column. DC publishes within ~10 days; two 90-day-cutoff control runs returned 4.5% and 5.2%, straddling this figure, confirming the lag does not bind here",
+    measuredUnderLagDays: 0,
+    sampleSize: 124,
   },
   fairfax: {
     pct: 7.5,
     displayable: true,
-    basis: "production-path backtest; Fairfax publishes within ~10 days and rests on assessed value, which does not go stale",
+    basis:
+      "production-path backtest, 124-holdout run, 'error of what is shown' column (McLean + Annandale). NOT a lag-cost figure — that script measures the engine path. A 90-day-cutoff re-run returned 6.6% on 49 paired holdouts at 96% published, i.e. BETTER than this, because Fairfax valuations rest on assessed value and an assessment does not go stale. The more conservative figure is kept. See the assessment-leak note above: Fairfax is the jurisdiction most flattered by that leak",
+    measuredUnderLagDays: 0,
+    sampleSize: 124,
   },
   maryland: {
     pct: 11.7,
     displayable: true,
     basis:
-      "production-path backtest run with a 90-day comp cutoff (`production-path-backtest.ts 25 90`), which is the publishing lag Maryland actually has. n=44 paired across Rockville, Bethesda, Frederick and Columbia; 67% published",
+      "production-path backtest run with a 90-day comp cutoff (`production-path-backtest.ts 25 90`), the publishing lag Maryland actually has. Two runs: 11.7% (n=44, 67% published) and 10.1% (n=36, 69% published). The higher is kept — they straddle ~1pp of sampling noise and every figure here is a floor",
+    measuredUnderLagDays: 90,
+    sampleSize: 44,
     qualifier: "measured under Maryland's ~3-month reporting lag",
   },
 };
