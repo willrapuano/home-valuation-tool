@@ -102,6 +102,29 @@ npx tsx scripts/data-source-canary.ts   # exits non-zero when the source is brok
 do — public records cover Fairfax County and all of Maryland, the external
 upstream covers everywhere else.
 
+## Is production running this?
+
+```bash
+npx tsx scripts/production-parity.ts
+```
+
+Reads `/api/version` on the live site and compares its commit SHA against
+`origin/main`. Exits non-zero on a mismatch, retrying with backoff so a
+deployment still building is a pass rather than a false alarm.
+
+**Run it after every merge.** Measured 2026-07-30: while this repository
+redesigned the landing page, built the accuracy display gate and corrected three
+county medians, the live site went on serving a build **eight commits behind** —
+`⚡ 30-Second Results`, `🔒 100% Private` and an unrounded seven-digit estimate —
+because the pull request was open and never merged. Every "verified by
+rendering" in that work was true, and none of it was deployed.
+
+Nothing in the codebase could detect that, because nothing ever asked production
+what it was running. Local tests, local screenshots and live backtests all pass
+against a build no homeowner sees.
+
+---
+
 ## Coverage and measured accuracy
 
 Public-records providers are declared in `COVERAGE` in `app/api/avm/route.ts`

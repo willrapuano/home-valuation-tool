@@ -78,6 +78,17 @@ const CANDIDATE_LIMIT = 200;
 const LOOKUP_ATTEMPTS = 3;
 
 /**
+ * Attempts at the bulk pool fetch, with exponential backoff between them.
+ *
+ * Not production behaviour and not meant to be — production never issues a
+ * 2,000-record query. This exists because a single transient failure here
+ * silently removes a whole market from the results, which is how Rockville came
+ * to be reported as a coverage hole it is not.
+ */
+const POOL_ATTEMPTS = 3;
+const POOL_BACKOFF_MS = 5_000;
+
+/**
  * Days of publishing lag to simulate. Comps are withheld for this long BEFORE
  * the sale, on top of the usual holdout, so the engine must extrapolate exactly
  * as it does live.
@@ -191,17 +202,45 @@ async function main() {
     };
     outcomes.push(outcome);
 
-    let pool: ComparableSale[];
-    try {
-      pool = await m.provider().fetchCandidates(
-        { location: { lat: m.lat, lng: m.lng }, propertyType: "single_family" },
-        { radiusMiles: 2.5, lookbackMonths: LOOKBACK_MONTHS, limit: 2000 }
-      );
-    } catch (err) {
-      outcome.failure = `pool fetch failed — ${(err as Error)?.message}`;
-      console.error(`  ${m.jurisdiction}/${m.name}: ${outcome.failure}`);
-      continue;
+    /*
+     * RETRIED WITH BACKOFF, AND NAMED WHEN IT STILL FAILS.
+     *
+     * The pool fetch is bulk-shaped — 2,000 records over 2.5 miles — and this
+     * script issues one per market back to back. `maryland/Rockville` failed it
+     * in two consecutive runs, which read as "Rockville is dark" and was
+     * reported as a coverage caveat. It was not: pushing the same coordinates
+     * through the POINT-shaped production path afterwards valued them fine.
+     * The harness was hitting a service it had just finished hammering.
+     *
+     * A single attempt turns transient contention into a permanent-looking
+     * hole in the coverage map, so it retries — and if it still fails, the
+     * failure is recorded on the outcome and printed in the summary rather
+     * than left in scrollback.
+     */
+    let pool: ComparableSale[] | null = null;
+    for (let attempt = 1; attempt <= POOL_ATTEMPTS; attempt++) {
+      try {
+        pool = await m.provider().fetchCandidates(
+          { location: { lat: m.lat, lng: m.lng }, propertyType: "single_family" },
+          { radiusMiles: 2.5, lookbackMonths: LOOKBACK_MONTHS, limit: 2000 }
+        );
+        break;
+      } catch (err) {
+        const message = (err as Error)?.message ?? String(err);
+        if (attempt === POOL_ATTEMPTS) {
+          outcome.failure = `pool fetch failed after ${POOL_ATTEMPTS} attempts — ${message}`;
+          console.error(`  ${m.jurisdiction}/${m.name}: ${outcome.failure}`);
+        } else {
+          const wait = POOL_BACKOFF_MS * 2 ** (attempt - 1);
+          console.error(
+            `  ${m.jurisdiction}/${m.name}: pool fetch attempt ${attempt} failed ` +
+              `(${message}) — retrying in ${wait / 1000}s`
+          );
+          await new Promise(r => setTimeout(r, wait));
+        }
+      }
     }
+    if (!pool) continue;
     outcome.pool = pool.length;
 
     const usable = pool.filter(
