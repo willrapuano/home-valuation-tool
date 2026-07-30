@@ -24,11 +24,51 @@ integrate it.
 
 ## Integrated
 
-| Jurisdiction | Sale price | Assessed value | Characteristics | Arm's-length | Street address | MdAPE |
-|---|---|---|---|---|---|---|
-| Washington, DC | yes | yes | beds, baths, GBA, condition, year | **yes** | yes | **4.5%** |
-| Fairfax County, VA | yes | yes | none | inferred | **no — see below** | **5.3%** |
-| Maryland (all 24) | yes | yes | sqft, lot, year, grade | inferred | yes | **8.7%** |
+| Jurisdiction | Sale price | Assessed value | Characteristics | Arm's-length | Street address |
+|---|---|---|---|---|---|
+| Washington, DC | yes | yes | beds, baths, GBA, condition, year | **yes** | yes |
+| Fairfax County, VA | yes | yes | none | inferred | **no — see below** |
+| Maryland (all 24) | yes | yes | sqft, lot, year, grade | inferred | yes |
+
+## Accuracy: the engine, and the product
+
+These are two different numbers and conflating them has already cost dearly.
+`scripts/production-path-backtest.ts` measures both on the same properties.
+
+| | engine (record subject) | product (live subject) | published | **error of what is shown** |
+|---|---|---|---|---|
+| Washington, DC | 5.9% | 5.9% | 81% | **5.9%** |
+| Maryland | 6.9% | 8.0% | 53% | **6.9%** |
+| Fairfax County | 5.4% | 7.2% | 97% | **7.5%** |
+| **all** | 6.0% | 6.5% | 77% | **6.4%** |
+
+*88 paired holdouts across six markets. Both columns are computed over the same
+properties — comparing each over whatever it happened to answer reports a
+difference in which homes were valued as a difference in accuracy, the same
+survivorship error that made a tight search radius look good in
+`adaptive-radius.ts`.*
+
+**Engine** hands the valuation a perfect description of the house, straight off
+the row being predicted. That is what every other backtest here measures, and
+it is not available to production, which has only a latitude and longitude.
+
+**Product** resolves the subject the way a request does, through
+`lookupSubject`. The gap between the columns is subject-lookup quality. DC's is
+now zero, at 100% exact-parcel resolution — before the containment fix it was
++12.9pp. Fairfax's remaining 1.7pp tracks its 86% exact rate: it publishes no
+characteristics, so the subject is nothing but the assessment, and a wrong
+parcel means a wrong adjustment basis directly.
+
+**Published** is how often a homeowner sees anything at all;
+`shouldPublishEstimate` withholds low confidence. Maryland showing 53% is the
+largest coverage problem in the tool — roughly half of Maryland visitors get no
+number — and it is a bigger gap than DC's, which was the one that looked
+alarming from a handful of hand-picked points.
+
+Re-run this after any change to a provider's `lookupSubject`, candidate query,
+or the publish gate. The older per-jurisdiction figures (DC 4.5%, Fairfax 5.3%,
+Maryland 8.7%) were engine numbers on different samples; they describe the
+scoring, not what anyone receives.
 
 ### Fairfax publishes no street address with a sale
 

@@ -115,11 +115,26 @@ Accuracy is measured by holdout backtest: each property is valued as of the day
 before it sold, from sales that had already closed, with the property excluded
 from its own comp set.
 
-| Source | Coverage | Holdout MdAPE | n |
-|---|---|---|---|
-| Washington, DC | citywide | **4.5%** | 232 |
-| Fairfax County | 1 county | **5.3%** | 239 |
-| Maryland (SDAT) | all 24 jurisdictions | **8.7%** | 268 |
+**Two numbers, and the difference matters.** A backtest hands the engine a
+perfect description of the house, taken from the row it is predicting.
+Production has only a latitude and longitude and must resolve the property
+itself, so it is a strictly harder problem — and for a while it was quietly a
+much worse one. `scripts/production-path-backtest.ts` measures both on the same
+properties, and it is the figure to quote:
+
+| Source | Coverage | Engine | **Product** | Shown to visitor |
+|---|---|---|---|---|
+| Washington, DC | citywide | 5.9% | **5.9%** | 81% |
+| Fairfax County | 1 county | 5.4% | **7.2%** | 97% |
+| Maryland (SDAT) | all 24 jurisdictions | 6.9% | **8.0%** | 53% |
+| **all** | | 6.0% | **6.5%** | 77% |
+
+*88 paired holdouts. "Shown" is how often an estimate clears the confidence
+gate; below it the tool offers a CMA rather than a number.*
+
+The engine column, on larger per-source samples, is DC 4.5% / Fairfax 5.3% /
+Maryland 8.7%. Those describe the scoring, not what a homeowner receives — see
+`docs/jurisdiction-data-sources.md`.
 
 DC is the most accurate because it is the only source that states whether a
 sale was arm's-length instead of leaving it to be inferred. Filtering to
