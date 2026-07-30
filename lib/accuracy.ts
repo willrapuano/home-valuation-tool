@@ -58,9 +58,27 @@
  * A PREDICTION THAT WAS WRONG, RECORDED BECAUSE IT WAS WRONG. Fixing the lookup
  * was expected to raise Maryland's publish rate, on the theory that timeouts
  * were suppressing coverage. It did not: 67%, 69%, 66% across the three runs.
- * Coverage is limited by how many usable comps survive the lag, not by lookups
- * failing. The fix bought correctness and reliability, not reach — only fresher
- * data buys reach.
+ * The fix bought correctness and reliability, not reach.
+ *
+ * AND THE FIRST EXPLANATION FOR THAT WAS ALSO WRONG. "Coverage is limited by how
+ * many usable comps survive the lag" was written here, and the numbers do not
+ * support it either: Maryland publishes 68% at ZERO lag (the 124-holdout run)
+ * against 66–69% at a 90-day cutoff. Flat. The lag is not what bounds coverage.
+ *
+ * So fresher Maryland data is an ACCURACY case, not a coverage one — it would
+ * move the displayed band from ~11.7% toward the ~6.9% measured at zero lag,
+ * which is a large gain, and it is not evidence that more Maryland visitors
+ * would see a number.
+ *
+ * What DOES bound coverage is unmeasured: the confidence gate rejecting because
+ * the nearby sales are too few or too dissimilar, which is a density and
+ * heterogeneity property of those markets rather than a freshness one. Do not
+ * quote a coverage improvement from fresh data until something measures it.
+ *
+ * (`lag-cost.ts` shows a `valued` column falling 93% -> 73% with lag. That is
+ * NOT this quantity: it is pooled across all three jurisdictions, and it counts
+ * "produced an estimate at all" rather than "cleared the publish gate". It has
+ * been mistaken for a Maryland coverage figure once already.)
  *
  * MARYLAND IS 10–12%, not 6.6% and not 9.5%. Three runs at n=36–47 give 11.7%,
  * 10.1% and 11.2%; the highest ships, because these are floors (below). It is displayed
