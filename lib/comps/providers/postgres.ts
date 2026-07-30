@@ -1,5 +1,5 @@
 import { query } from "../../db";
-import { ComparableSale, CompsProvider, Condition, LatLng, PropertyType, SubjectProperty } from "../types";
+import { ComparableSale, CompsProvider, Condition, LatLng, PropertyType, SubjectLookup, SubjectProperty } from "../types";
 
 /**
  * Comps from our own ingested copy of the public records.
@@ -164,7 +164,7 @@ export class PostgresProvider implements CompsProvider {
    */
   async lookupSubject(
     location: LatLng
-  ): Promise<(Partial<SubjectProperty> & { lastSalePrice?: number; lastSaleDate?: string }) | null> {
+  ): Promise<SubjectLookup | null> {
     // Same allow-list as fetchCandidates. This path publishes too — the
     // subject's living area and assessment are shown on the results screen —
     // so restricting only the comp search would leave the side door open.
@@ -186,6 +186,11 @@ export class PostgresProvider implements CompsProvider {
 
     const comp = toComp(r);
     return {
+      // NEVER exact. This table holds properties that have SOLD; a home that
+      // has not changed hands in the window is simply not in it, so this is
+      // the nearest neighbour's description. Fine for choosing comps, wrong to
+      // show the homeowner as facts about their house.
+      exactParcel: false,
       location,
       propertyType: comp.propertyType,
       assessedValue: comp.assessedValue,

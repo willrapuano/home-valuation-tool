@@ -1,4 +1,4 @@
-import { ComparableSale, CompsProvider, Condition, LatLng, PropertyType, SubjectProperty } from "../types";
+import { ComparableSale, CompsProvider, Condition, LatLng, PropertyType, SubjectLookup, SubjectProperty } from "../types";
 import { EsriFeature, esriQuery as sharedEsriQuery } from "./esri";
 
 /**
@@ -34,13 +34,25 @@ const MAX_RECORDS = 2000;
  * polygon containing this point" — see findSubjectParcel for why that has to
  * come first.
  */
-const SUBJECT_SEARCH_LADDER = [0, 0.02, 0.05, 0.1];
+const SUBJECT_SEARCH_LADDER = [0, 0.1];
+/*
+ * TWO RUNGS, NOT FOUR. Each rung is a sequential round trip against a service
+ * that is occasionally slow, and the route's whole budget is 20s. A four-rung
+ * ladder measured 12.1s in Frederick and timed out entirely in Silver Spring —
+ * trading a wrong answer for no answer. Containment plus one widened fallback
+ * keeps the correctness that matters and bounds the cost at two queries.
+ */
 /**
  * Enough that a widened rung ranks the true nearest parcel rather than the
  * nearest of an arbitrary page. DC packs 159-340 parcels into 0.1 miles; the
  * old value of 40 was well under that and silently returned the wrong house.
  */
 const SUBJECT_SEARCH_RECORDS = 1000;
+/**
+ * Containment returns the one or two parcels under the point, so it needs no
+ * large page — and asking for one costs time on a slow service.
+ */
+const CONTAINMENT_RECORDS = 25;
 /**
  * SSLs per CAMA join query. Fairfax taught this lesson expensively: a 179-key
  * IN clause spent seven seconds in the query planner and timed out. Small
@@ -383,7 +395,7 @@ export class DcProvider implements CompsProvider {
    */
   private async findSubjectParcel(
     location: LatLng
-  ): Promise<{ attributes: Record<string, unknown>; location: LatLng } | null> {
+  ): Promise<{ attributes: Record<string, unknown>; location: LatLng; exact: boolean } | null> {
     for (const distanceMiles of SUBJECT_SEARCH_LADDER) {
       const features = await esriQuery(OWNER_LAYER, {
         geometry: JSON.stringify({
@@ -400,7 +412,7 @@ export class DcProvider implements CompsProvider {
         outSR: "4326",
         outFields: "SSL,PREMISEADD,SALEPRICE,SALEDATE,NEWTOTAL,OLDTOTAL,LANDAREA,NBHDNAME,PROPTYPE",
         returnGeometry: "true",
-        resultRecordCount: String(SUBJECT_SEARCH_RECORDS),
+        resultRecordCount: String(distanceMiles > 0 ? SUBJECT_SEARCH_RECORDS : CONTAINMENT_RECORDS),
       });
 
       assertFields(features, ["SSL"], "Owner Polygons");
@@ -423,17 +435,20 @@ export class DcProvider implements CompsProvider {
         }
       }
 
-      if (best && bestLocation) return { attributes: best.attributes, location: bestLocation };
+      // Only the containment rung (distance 0) describes the requested home.
+      if (best && bestLocation) {
+        return { attributes: best.attributes, location: bestLocation, exact: distanceMiles === 0 };
+      }
     }
     return null;
   }
 
   async lookupSubject(
     location: LatLng
-  ): Promise<(Partial<SubjectProperty> & { lastSalePrice?: number; lastSaleDate?: string }) | null> {
+  ): Promise<SubjectLookup | null> {
     const found = await this.findSubjectParcel(location);
     if (!found) return null;
-    const { attributes: a, location: bestLocation } = found;
+    const { attributes: a, location: bestLocation, exact } = found;
 
     const ssl = str(a.SSL);
     const cama = ssl ? (await this.fetchCama([ssl])).get(ssl) : undefined;
@@ -451,6 +466,7 @@ export class DcProvider implements CompsProvider {
       condition: cama?.condition,
       lastSalePrice: num(a.SALEPRICE),
       lastSaleDate: parseDcDate(a.SALEDATE),
+      exactParcel: exact,
     };
   }
 }
