@@ -88,17 +88,18 @@ const SELECT_COLUMNS = `
  * served. That was harmless while the only writer was `scripts/ingest.ts`,
  * which pulls the same public-records sources the live providers already use.
  *
- * It stops being harmless the moment anything else writes to the table.
- * `scripts/ingest-titlepro.ts` loads TitlePro247 farm-list exports, and whether
- * that licensed third-party data may be shown to anonymous consumers is an
- * open question. Without this list, ingesting it would publish it — silently,
- * on the next request, with no code change and no decision.
+ * It stops being harmless the moment anything else writes to the table:
+ * ingesting a source would publish it silently, on the next request, with no
+ * code change and no decision. Serving is therefore opt-in per jurisdiction,
+ * and adding a name here is the deliberate act that publishes a source.
  *
- * So serving is opt-in per jurisdiction. These three are county public record,
- * already served live, and carry no redistribution restriction. Adding to this
- * list is the deliberate act that publishes a source.
+ * The first three are county public record and carry no redistribution
+ * restriction. Arlington and Loudoun come from TitlePro247 farm-list exports
+ * (`scripts/ingest-titlepro.ts`) — licensed third-party data, confirmed by the
+ * licence holder as permitted for consumer display. Neither has any rows yet;
+ * listing them means an ingest will be served rather than sitting inert.
  */
-const PUBLIC_RECORD_JURISDICTIONS = ["dc", "fairfax", "maryland"] as const;
+const DEFAULT_JURISDICTIONS = ["dc", "fairfax", "maryland", "arlington", "loudoun"] as const;
 
 export interface PostgresOptions {
   /**
@@ -109,9 +110,9 @@ export interface PostgresOptions {
    */
   qualifiedOnly?: boolean;
   /**
-   * Which jurisdictions to read. Defaults to the public-record sources.
-   * Overriding this is how a licensed source gets published, once someone has
-   * established that it may be.
+   * Which jurisdictions to read. Defaults to every source cleared for display.
+   * Override to narrow — e.g. to serve only public records while a commercial
+   * ingest is being validated.
    */
   jurisdictions?: readonly string[];
 }
@@ -125,7 +126,7 @@ export class PostgresProvider implements CompsProvider {
     subject: SubjectProperty,
     opts: { radiusMiles: number; lookbackMonths: number; limit?: number }
   ): Promise<ComparableSale[]> {
-    const { qualifiedOnly = true, jurisdictions = PUBLIC_RECORD_JURISDICTIONS } = this.opts;
+    const { qualifiedOnly = true, jurisdictions = DEFAULT_JURISDICTIONS } = this.opts;
 
     const rows = await query<SaleRow>(
       `SELECT ${SELECT_COLUMNS}
@@ -168,7 +169,7 @@ export class PostgresProvider implements CompsProvider {
     // Same allow-list as fetchCandidates. This path publishes too — the
     // subject's living area and assessment are shown on the results screen —
     // so restricting only the comp search would leave the side door open.
-    const { jurisdictions = PUBLIC_RECORD_JURISDICTIONS } = this.opts;
+    const { jurisdictions = DEFAULT_JURISDICTIONS } = this.opts;
 
     const rows = await query<SaleRow>(
       `SELECT ${SELECT_COLUMNS}

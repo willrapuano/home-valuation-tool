@@ -7,6 +7,10 @@
  * the subject from one layer and the comps from the other biases every
  * Maryland estimate. Joins the same accounts across both layers to find out.
  */
+// This script imports nothing, so without an explicit export TypeScript treats
+// it as a global script and its helpers land in the global scope.
+export {};
+
 const BASE = "https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre";
 
 async function q(layer: string, params: Record<string, string>) {
