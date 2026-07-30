@@ -1,4 +1,4 @@
-import { ComparableSale, CompsProvider, Condition, LatLng, PropertyType, SubjectProperty } from "../types";
+import { ComparableSale, CompsProvider, Condition, LatLng, PropertyType, SubjectLookup, SubjectProperty } from "../types";
 import { EsriFeature, esriQuery as sharedEsriQuery } from "./esri";
 
 /**
@@ -49,9 +49,21 @@ const MAX_RECORDS = 2000;
  * first — a plain radius query returns an arbitrary page of neighbours and
  * silently describes the wrong house.
  */
-const SUBJECT_SEARCH_LADDER = [0, 0.02, 0.05, 0.1];
+const SUBJECT_SEARCH_LADDER = [0, 0.1];
+/*
+ * TWO RUNGS, NOT FOUR. Each rung is a sequential round trip against a service
+ * that is occasionally slow, and the route's whole budget is 20s. A four-rung
+ * ladder measured 12.1s in Frederick and timed out entirely in Silver Spring —
+ * trading a wrong answer for no answer. Containment plus one widened fallback
+ * keeps the correctness that matters and bounds the cost at two queries.
+ */
 /** Enough that a widened rung ranks the true nearest parcel, not a page of 40. */
 const SUBJECT_SEARCH_RECORDS = 1000;
+/**
+ * Containment returns the one or two parcels under the point, so it needs no
+ * large page — and asking for one costs time on a slow service.
+ */
+const CONTAINMENT_RECORDS = 25;
 
 /**
  * Maryland land use codes, confirmed against a 541-record Bethesda sample:
@@ -309,7 +321,7 @@ export class MarylandProvider implements CompsProvider {
    */
   async lookupSubject(
     location: LatLng
-  ): Promise<(Partial<SubjectProperty> & { lastSalePrice?: number; lastSaleDate?: string }) | null> {
+  ): Promise<SubjectLookup | null> {
     for (const distanceMiles of SUBJECT_SEARCH_LADDER) {
     const features = await esriQuery(PARCEL_LAYER, {
       geometry: JSON.stringify({
@@ -334,7 +346,7 @@ export class MarylandProvider implements CompsProvider {
       outFields:
         "ACCTID,ADDRESS,SQFTSTRC,YEARBLT,ACRES,SUBDIVSN,STRUGRAD,LU,ZIPCODE,TRADATE,CONSIDR1,NFMTTLVL",
       returnGeometry: "true",
-      resultRecordCount: String(SUBJECT_SEARCH_RECORDS),
+      resultRecordCount: String(distanceMiles > 0 ? SUBJECT_SEARCH_RECORDS : CONTAINMENT_RECORDS),
     });
 
     assertFields(features, PARCEL_FIELDS, "MD_PropertyData");
@@ -363,6 +375,10 @@ export class MarylandProvider implements CompsProvider {
       ...characteristics(a),
       lastSalePrice: num(a.CONSIDR1),
       lastSaleDate: parseMdDate(a.TRADATE),
+      // Only the containment rung describes the requested home; a widened
+      // rung found a neighbour, which is fine for picking comps and wrong to
+      // print back as facts about this house.
+      exactParcel: distanceMiles === 0,
     };
     }
     return null;

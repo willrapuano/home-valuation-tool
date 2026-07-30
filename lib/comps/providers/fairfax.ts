@@ -1,4 +1,4 @@
-import { ComparableSale, CompsProvider, LatLng, PropertyType, SubjectProperty } from "../types";
+import { ComparableSale, CompsProvider, LatLng, PropertyType, SubjectLookup, SubjectProperty } from "../types";
 import { EsriFeature, esriQuery as sharedEsriQuery } from "./esri";
 
 /**
@@ -387,7 +387,7 @@ export class FairfaxCountyProvider implements CompsProvider {
    */
   async lookupSubject(
     location: LatLng
-  ): Promise<(Partial<SubjectProperty> & { taxYear?: number }) | null> {
+  ): Promise<SubjectLookup | null> {
     const geometry = JSON.stringify({
       x: location.lng,
       y: location.lat,
@@ -417,21 +417,23 @@ export class FairfaxCountyProvider implements CompsProvider {
         returnGeometry: "false",
         resultRecordCount: "1",
       });
-      if (features[0]) return this.toSubject(features[0].attributes, location);
+      if (features[0]) return this.toSubject(features[0].attributes, location, distanceMiles === 0);
     }
     return null;
   }
 
   private toSubject(
     a: Record<string, unknown>,
-    location: LatLng
-  ): Partial<SubjectProperty> & { taxYear?: number } {
+    location: LatLng,
+    exactParcel: boolean
+  ): SubjectLookup {
 
     return {
       location,
       propertyType: LAND_USE[String(a.LUC ?? "").trim()] ?? "other",
       assessedValue: typeof a.APRTOT === "number" ? a.APRTOT : undefined,
       taxYear: typeof a.TAXYR === "number" ? a.TAXYR : undefined,
+      exactParcel,
     };
   }
 

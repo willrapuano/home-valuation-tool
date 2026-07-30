@@ -78,16 +78,34 @@ describe.each([
     }
   });
 
-  it("requests enough records that 'nearest' is genuinely the nearest", async () => {
+  it("requests enough records on a WIDENED rung that 'nearest' is genuinely the nearest", async () => {
     // The old value was 40, against 159-340 parcels within 0.1 miles in DC. A
     // widened rung that pages arbitrarily reintroduces exactly the bug the
     // containment step was added to fix.
+    //
+    // Containment is exempt and deliberately small: it returns only the one or
+    // two parcels under the point, and asking a slow service for a large page
+    // costs time for nothing.
+    await make().lookupSubject(AT);
+
+    const widened = calls.filter(
+      c => c.params.geometryType === "esriGeometryPoint" && Number(c.params.distance ?? 0) > 0
+    );
+    expect(widened.length).toBeGreaterThan(0);
+    for (const c of widened) {
+      expect(Number(c.params.resultRecordCount)).toBeGreaterThanOrEqual(500);
+    }
+  });
+
+  it("bounds the ladder at two round trips", async () => {
+    // Each rung is sequential against a service that is occasionally slow, and
+    // the route's entire budget is 20s. A four-rung ladder measured 12.1s in
+    // Frederick and timed out outright in Silver Spring — which trades a wrong
+    // answer for no answer, a worse deal than the bug it was fixing.
     await make().lookupSubject(AT);
 
     const spatial = calls.filter(c => c.params.geometryType === "esriGeometryPoint");
-    for (const c of spatial) {
-      expect(Number(c.params.resultRecordCount)).toBeGreaterThanOrEqual(500);
-    }
+    expect(spatial.length).toBeLessThanOrEqual(2);
   });
 
   it("gives up rather than widening without limit", async () => {
@@ -100,5 +118,40 @@ describe.each([
     const spatial = calls.filter(c => c.params.geometryType === "esriGeometryPoint");
     const widest = Math.max(...spatial.map(c => Number(c.params.distance ?? 0)));
     expect(widest).toBeLessThanOrEqual(0.1);
+  });
+});
+
+describe("exactParcel — the flag that decides what may be SHOWN", () => {
+  /**
+   * Resolving a neighbour is acceptable for CHOOSING comparable sales; it is
+   * not acceptable for printing "your home has 4 bedrooms". Those two uses were
+   * indistinguishable to the caller, which is how DC spent weeks describing the
+   * house next door. `exactParcel` is what separates them, so it must be false
+   * on every path that did not find the containing parcel.
+   */
+  it("is false on the Postgres provider, which can only ever find a neighbour", async () => {
+    // That table holds properties that have SOLD. A home that has not changed
+    // hands is simply not in it, so this is never the subject itself.
+    vi.resetModules();
+    vi.doMock("../../db", () => ({
+      query: async () => [
+        {
+          parcel_id: "X", address: "1 Test St", lat: 38.9, lng: -77.1,
+          sold_price: "850000", sold_date: "2026-03-15", property_type: "single_family",
+          assessed_value: "820000", sqft: 2100, lot_sqft: 8000, year_built: 1985,
+          beds: 4, baths: 2.5, condition: 3, subdivision: null, zip_code: "20003",
+          arms_length: true,
+        },
+      ],
+      hasDatabase: () => true,
+    }));
+    const { PostgresProvider } = await import("./postgres");
+
+    const got = await new PostgresProvider().lookupSubject({ lat: 38.9, lng: -77.1 });
+    expect(got).not.toBeNull();
+    // It still describes something — that is useful for comp selection.
+    expect(got!.sqft).toBe(2100);
+    // But it must never claim to be the home the visitor asked about.
+    expect(got!.exactParcel).toBe(false);
   });
 });

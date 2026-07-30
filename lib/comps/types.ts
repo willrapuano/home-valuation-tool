@@ -44,6 +44,29 @@ export interface SubjectProperty {
   assessedValue?: number;
 }
 
+/**
+ * What a provider can say about the home being valued.
+ *
+ * `exactParcel` is the field that decides whether any of it may be SHOWN.
+ *
+ * Providers resolve a subject from a geocoded point, and they do not all
+ * resolve the same thing. A containment query returns the parcel the point sits
+ * in — those characteristics are facts about the homeowner's house. A widened
+ * fallback, or `PostgresProvider` picking the nearest ingested sale, returns a
+ * NEIGHBOUR: good enough to select comparable sales from, and wrong to print
+ * back to the homeowner as "your home has 4 bedrooms".
+ *
+ * Both were previously indistinguishable to the caller, which is how DC spent
+ * weeks describing the house next door. Set it true only for an exact match.
+ */
+export interface SubjectLookup extends Partial<SubjectProperty> {
+  lastSalePrice?: number;
+  lastSaleDate?: string;
+  taxYear?: number;
+  /** True only when this describes the parcel containing the requested point. */
+  exactParcel?: boolean;
+}
+
 /** A closed sale that might serve as a comparable. */
 export interface ComparableSale extends SubjectProperty {
   id: string;

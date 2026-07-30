@@ -106,10 +106,25 @@ comparing the two against live data, which is now what
 `lib/comps/providers/subject-lookup.test.ts` pins in structure.
 
 Omitting `distance` makes the query a point-in-polygon test: the containing
-parcel comes back, or nothing does. Widening is the genuine fallback for a
-geocode landing on a street centreline, and the widened rungs now request
-enough records that "nearest" is really the nearest. Fairfax always did it this
-way, which is why Fairfax was unaffected.
+parcel comes back, or nothing does. One widened rung remains as the genuine
+fallback for a geocode landing on a street centreline, and it requests enough
+records that "nearest" is really the nearest. Fairfax always did it this way,
+which is why Fairfax was unaffected.
+
+**The ladder is two rungs, and that bound is load-bearing.** A first attempt
+used four (0, 0.02, 0.05, 0.1). Each rung is a sequential round trip against a
+service that is occasionally slow, and Maryland measured 12.1s in Frederick and
+timed out entirely in Silver Spring against the route's 20s budget — trading a
+wrong answer for no answer. Two rungs brought those to 6.1s and 8.3s.
+
+### Only an exact match may be shown
+
+Resolving a neighbour is fine for CHOOSING comparable sales and wrong for
+printing "your home has 4 bedrooms". `SubjectLookup.exactParcel` separates the
+two, and `/api/avm` publishes the subject's characteristics only when it is
+true. It is false on a widened rung, and always false for `PostgresProvider`,
+whose table holds only properties that have SOLD — a home that has not changed
+hands is not in it, so its "subject" is necessarily the nearest neighbour.
 
 ## Publishing lag — measured 2026-07-29
 

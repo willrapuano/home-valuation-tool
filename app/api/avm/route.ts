@@ -5,7 +5,7 @@ import { RateLimiter, clientKey } from "@/lib/rate-limit";
 import { valueFromComps } from "@/lib/comps";
 import { shouldPublishEstimate } from "@/lib/comps/publish";
 import { toPublicComps } from "@/lib/comps/present";
-import type { CompsProvider, SubjectProperty } from "@/lib/comps/types";
+import type { CompsProvider, SubjectLookup, SubjectProperty } from "@/lib/comps/types";
 import type { EngineOptions } from "@/lib/comps/config";
 import { FairfaxCountyProvider } from "@/lib/comps/providers/fairfax";
 import { MarylandProvider } from "@/lib/comps/providers/maryland";
@@ -176,9 +176,7 @@ const COVERAGE: {
    */
   engineOptions?: Partial<EngineOptions>;
   create: () => CompsProvider & {
-    lookupSubject(location: { lat: number; lng: number }): Promise<
-      (Partial<SubjectProperty> & { lastSalePrice?: number; lastSaleDate?: string }) | null
-    >;
+    lookupSubject(location: { lat: number; lng: number }): Promise<SubjectLookup | null>;
   };
 }[] = [
   {
@@ -323,6 +321,25 @@ async function attempt(
       lookbackMonths: LOOKBACK_MONTHS,
       assessedValue: subjectInfo.assessedValue,
       source: coverage.name,
+      // The subject's own characteristics, which were computed, used to select
+      // comps, and then dropped on the floor — the same waste as the comps
+      // themselves before #8. "Property Details" rendered as a header with one
+      // row, and Price/SqFt as an em-dash, in every jurisdiction.
+      //
+      // ONLY WHEN THE LOOKUP FOUND THE ACTUAL PARCEL. A widened fallback, or
+      // the Postgres provider's nearest ingested sale, describes a NEIGHBOUR.
+      // Those are good enough to choose comparable sales from and wrong to
+      // print back as "your home has 4 bedrooms" — which is exactly the
+      // mistake DC was making silently until the containment fix.
+      subject: subjectInfo.exactParcel
+        ? {
+            beds: subjectInfo.beds ?? null,
+            baths: subjectInfo.baths ?? null,
+            sqft: subjectInfo.sqft ?? null,
+            yearBuilt: subjectInfo.yearBuilt ?? null,
+            propertyType: subjectInfo.propertyType ?? null,
+          }
+        : null,
       // The sales the number is actually built from. Previously computed and
       // then discarded — see lib/comps/present.ts.
       comps: toPublicComps(result.comps, addresses),
@@ -489,8 +506,19 @@ export async function POST(req: NextRequest) {
           streetViewUrl: buildStreetViewUrl(fullAddress, lat, lng),
           fmr: fmr.source === "hud" ? fmr.values : null,
           areaMedianIncome,
-          pricePerSqft: null, rentZestimate: null,
-          beds: null, baths: null, sqft: null, yearBuilt: null, homeType: null,
+          rentZestimate: null,
+          beds: valued.subject?.beds ?? null,
+          baths: valued.subject?.baths ?? null,
+          sqft: valued.subject?.sqft ?? null,
+          yearBuilt: valued.subject?.yearBuilt ?? null,
+          homeType: valued.subject?.propertyType ?? null,
+          // Derived rather than published by any source, and only meaningful
+          // when the living area belongs to this home. Fairfax publishes no
+          // characteristics at all, so it stays null there — correctly.
+          pricePerSqft:
+            valued.subject?.sqft && valued.subject.sqft > 0
+              ? Math.round(valued.estimate / valued.subject.sqft)
+              : null,
         });
       }
     } catch (err) {
