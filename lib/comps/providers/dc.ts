@@ -29,8 +29,18 @@ const TIMEOUT_MS = 8_000;
 /** Fire a second attempt once the first has stalled this long. */
 const HEDGE_AFTER_MS = 2_500;
 const MAX_RECORDS = 2000;
-/** Widest search for the subject parcel, in miles. */
-const SUBJECT_SEARCH_MILES = 0.1;
+/**
+ * Subject lookup widens only when containment finds nothing. 0 means "the
+ * polygon containing this point" — see findSubjectParcel for why that has to
+ * come first.
+ */
+const SUBJECT_SEARCH_LADDER = [0, 0.02, 0.05, 0.1];
+/**
+ * Enough that a widened rung ranks the true nearest parcel rather than the
+ * nearest of an arbitrary page. DC packs 159-340 parcels into 0.1 miles; the
+ * old value of 40 was well under that and silently returned the wrong house.
+ */
+const SUBJECT_SEARCH_RECORDS = 1000;
 /**
  * SSLs per CAMA join query. Fairfax taught this lesson expensively: a 179-key
  * IN clause spent seven seconds in the query planner and timed out. Small
@@ -342,48 +352,88 @@ export class DcProvider implements CompsProvider {
    * Maryland the identical query went from 1.0s to 10.9s that way, which was
    * enough to blow the request timeout on every address in the state.
    */
+  /**
+   * The parcel the homeowner is standing on — CONTAINMENT FIRST, then widening.
+   *
+   * THE BUG THIS REPLACES, because it is subtle and cost DC dearly.
+   *
+   * This used to be a single radius query at 0.1 miles asking for 40 features,
+   * with no ordering, then a client-side pick of the nearest. In DC that radius
+   * covers 159–340 parcels. ArcGIS returned an arbitrary 40 of them, and the
+   * parcel the point actually sits in was usually not among the 40 — measured
+   * at 9 of 10 sampled Capitol Hill properties resolving to a DIFFERENT house.
+   *
+   * Nothing failed. Every one produced a confident-looking subject with a
+   * neighbour's living area, bedrooms, year built and assessment, up to 0.1
+   * miles away. Every downstream number was then computed against the wrong
+   * home: similarity scored on the wrong sqft, so worse comps; worse comps, so
+   * higher dispersion; higher dispersion, so "low" confidence — and the
+   * publish gate withheld 1 in 3 DC valuations entirely, in the jurisdiction
+   * with the BEST measured accuracy.
+   *
+   * No backtest could have caught it. They all supply the subject from the
+   * sales record and never call this at all.
+   *
+   * Omitting `distance` makes the point-in-polygon test the query rather than a
+   * radius sweep, so the containing parcel is returned or nothing is. The
+   * widening rungs are the genuine fallback — a geocoder that lands on the
+   * street centreline — and they now request enough records that "nearest"
+   * really is the nearest rather than the nearest of an arbitrary 40. Fairfax
+   * has always done it this way; DC and Maryland did not.
+   */
+  private async findSubjectParcel(
+    location: LatLng
+  ): Promise<{ attributes: Record<string, unknown>; location: LatLng } | null> {
+    for (const distanceMiles of SUBJECT_SEARCH_LADDER) {
+      const features = await esriQuery(OWNER_LAYER, {
+        geometry: JSON.stringify({
+          x: location.lng,
+          y: location.lat,
+          spatialReference: { wkid: 4326 },
+        }),
+        geometryType: "esriGeometryPoint",
+        ...(distanceMiles > 0
+          ? { distance: String(distanceMiles), units: "esriSRUnit_StatuteMile" }
+          : {}),
+        spatialRel: "esriSpatialRelIntersects",
+        inSR: "4326",
+        outSR: "4326",
+        outFields: "SSL,PREMISEADD,SALEPRICE,SALEDATE,NEWTOTAL,OLDTOTAL,LANDAREA,NBHDNAME,PROPTYPE",
+        returnGeometry: "true",
+        resultRecordCount: String(SUBJECT_SEARCH_RECORDS),
+      });
+
+      assertFields(features, ["SSL"], "Owner Polygons");
+
+      let best: EsriFeature | undefined;
+      let bestDistance = Infinity;
+      let bestLocation: LatLng | undefined;
+
+      for (const f of features) {
+        const type = propertyTypeFromProptype(f.attributes.PROPTYPE);
+        // Skip the commercial and vacant neighbours; we want the home.
+        if (type === "other" || type === "land") continue;
+        const c = ringCentroid(f.geometry?.rings);
+        if (!c) continue;
+        const d = (c.lng - location.lng) ** 2 + (c.lat - location.lat) ** 2;
+        if (d < bestDistance) {
+          bestDistance = d;
+          best = f;
+          bestLocation = c;
+        }
+      }
+
+      if (best && bestLocation) return { attributes: best.attributes, location: bestLocation };
+    }
+    return null;
+  }
+
   async lookupSubject(
     location: LatLng
   ): Promise<(Partial<SubjectProperty> & { lastSalePrice?: number; lastSaleDate?: string }) | null> {
-    const features = await esriQuery(OWNER_LAYER, {
-      geometry: JSON.stringify({
-        x: location.lng,
-        y: location.lat,
-        spatialReference: { wkid: 4326 },
-      }),
-      geometryType: "esriGeometryPoint",
-      distance: String(SUBJECT_SEARCH_MILES),
-      units: "esriSRUnit_StatuteMile",
-      spatialRel: "esriSpatialRelIntersects",
-      inSR: "4326",
-      outSR: "4326",
-      outFields: "SSL,PREMISEADD,SALEPRICE,SALEDATE,NEWTOTAL,OLDTOTAL,LANDAREA,NBHDNAME,PROPTYPE",
-      returnGeometry: "true",
-      resultRecordCount: "40",
-    });
-
-    assertFields(features, ["SSL"], "Owner Polygons");
-
-    let best: EsriFeature | undefined;
-    let bestDistance = Infinity;
-    let bestLocation: { lat: number; lng: number } | undefined;
-
-    for (const f of features) {
-      const type = propertyTypeFromProptype(f.attributes.PROPTYPE);
-      // Skip the commercial and vacant neighbours; we want the home.
-      if (type === "other" || type === "land") continue;
-      const c = ringCentroid(f.geometry?.rings);
-      if (!c) continue;
-      const d = (c.lng - location.lng) ** 2 + (c.lat - location.lat) ** 2;
-      if (d < bestDistance) {
-        bestDistance = d;
-        best = f;
-        bestLocation = c;
-      }
-    }
-
-    const a = best?.attributes;
-    if (!a || !bestLocation) return null;
+    const found = await this.findSubjectParcel(location);
+    if (!found) return null;
+    const { attributes: a, location: bestLocation } = found;
 
     const ssl = str(a.SSL);
     const cama = ssl ? (await this.fetchCama([ssl])).get(ssl) : undefined;

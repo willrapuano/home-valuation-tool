@@ -43,7 +43,15 @@ const TIMEOUT_MS = 8_000;
 const HEDGE_AFTER_MS = 2_500;
 const MAX_RECORDS = 2000;
 /** Widest search for the subject parcel, in miles. */
-const SUBJECT_SEARCH_MILES = 0.1;
+/**
+ * Subject lookup widens only when containment finds nothing; 0 means "the
+ * parcel containing this point". See lookupSubject for why that must come
+ * first — a plain radius query returns an arbitrary page of neighbours and
+ * silently describes the wrong house.
+ */
+const SUBJECT_SEARCH_LADDER = [0, 0.02, 0.05, 0.1];
+/** Enough that a widened rung ranks the true nearest parcel, not a page of 40. */
+const SUBJECT_SEARCH_RECORDS = 1000;
 
 /**
  * Maryland land use codes, confirmed against a 541-record Bethesda sample:
@@ -284,11 +292,25 @@ export class MarylandProvider implements CompsProvider {
    * evaluate the filter instead of using its spatial index — measured at 10.9
    * seconds against 1.0 second for the identical query without it, which was
    * enough to blow the request timeout on every Maryland address. Land use is
-   * filtered below instead, on the forty rows we actually get back.
+   * filtered client-side instead, on the rows we actually get back.
+   *
+   * CONTAINMENT FIRST. This used to be one radius query at 0.1 miles asking for
+   * 40 records with no ordering, then a client-side pick of the nearest. That
+   * returns an arbitrary page of whatever is near, and the parcel the point
+   * actually sits in need not be in it — measured in DC, which shares the
+   * pattern, at 9 of 10 properties resolving to a DIFFERENT house, with a
+   * neighbour's living area, year built and assessment. Nothing errors; the
+   * valuation is simply computed for the wrong home.
+   *
+   * Omitting `distance` makes the query a point-in-polygon test, so the
+   * containing parcel comes back or nothing does. The wider rungs are the real
+   * fallback — a geocode landing on the street centreline — and they request
+   * enough records that "nearest" is genuinely the nearest.
    */
   async lookupSubject(
     location: LatLng
   ): Promise<(Partial<SubjectProperty> & { lastSalePrice?: number; lastSaleDate?: string }) | null> {
+    for (const distanceMiles of SUBJECT_SEARCH_LADDER) {
     const features = await esriQuery(PARCEL_LAYER, {
       geometry: JSON.stringify({
         x: location.lng,
@@ -296,8 +318,9 @@ export class MarylandProvider implements CompsProvider {
         spatialReference: { wkid: 4326 },
       }),
       geometryType: "esriGeometryPoint",
-      distance: String(SUBJECT_SEARCH_MILES),
-      units: "esriSRUnit_StatuteMile",
+      ...(distanceMiles > 0
+        ? { distance: String(distanceMiles), units: "esriSRUnit_StatuteMile" }
+        : {}),
       spatialRel: "esriSpatialRelIntersects",
       inSR: "4326",
       outSR: "4326",
@@ -311,7 +334,7 @@ export class MarylandProvider implements CompsProvider {
       outFields:
         "ACCTID,ADDRESS,SQFTSTRC,YEARBLT,ACRES,SUBDIVSN,STRUGRAD,LU,ZIPCODE,TRADATE,CONSIDR1,NFMTTLVL",
       returnGeometry: "true",
-      resultRecordCount: "40",
+      resultRecordCount: String(SUBJECT_SEARCH_RECORDS),
     });
 
     assertFields(features, PARCEL_FIELDS, "MD_PropertyData");
@@ -333,7 +356,7 @@ export class MarylandProvider implements CompsProvider {
     }
 
     const a = best?.attributes;
-    if (!a) return null;
+    if (!a) continue;
 
     return {
       location,
@@ -341,5 +364,7 @@ export class MarylandProvider implements CompsProvider {
       lastSalePrice: num(a.CONSIDR1),
       lastSaleDate: parseMdDate(a.TRADATE),
     };
+    }
+    return null;
   }
 }

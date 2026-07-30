@@ -32,14 +32,16 @@ const MARKETS: {
   lng: number;
   provider: () => CompsProvider;
   assessmentDate?: string;
+  /** Must mirror COVERAGE in app/api/avm/route.ts or this measures a system we do not run. */
+  engineOptions?: Record<string, unknown>;
 }[] = [
   { jurisdiction: "dc", name: "Capitol Hill", lat: 38.887, lng: -76.993, provider: () => new DcProvider() },
   { jurisdiction: "dc", name: "Petworth", lat: 38.942, lng: -77.023, provider: () => new DcProvider() },
   { jurisdiction: "dc", name: "Anacostia", lat: 38.8637, lng: -76.9836, provider: () => new DcProvider() },
-  { jurisdiction: "maryland", name: "Bethesda", lat: 38.98836, lng: -77.08292, provider: () => new MarylandProvider() },
-  { jurisdiction: "maryland", name: "Silver Spring", lat: 38.9907, lng: -77.0261, provider: () => new MarylandProvider() },
-  { jurisdiction: "maryland", name: "Frederick", lat: 39.4143, lng: -77.4105, provider: () => new MarylandProvider() },
-  { jurisdiction: "maryland", name: "Annapolis", lat: 38.9784, lng: -76.4922, provider: () => new MarylandProvider() },
+  { jurisdiction: "maryland", name: "Bethesda", engineOptions: { maxAssessmentRatioDeviation: 0.5 }, lat: 38.98836, lng: -77.08292, provider: () => new MarylandProvider() },
+  { jurisdiction: "maryland", name: "Silver Spring", engineOptions: { maxAssessmentRatioDeviation: 0.5 }, lat: 38.9907, lng: -77.0261, provider: () => new MarylandProvider() },
+  { jurisdiction: "maryland", name: "Frederick", engineOptions: { maxAssessmentRatioDeviation: 0.5 }, lat: 39.4143, lng: -77.4105, provider: () => new MarylandProvider() },
+  { jurisdiction: "maryland", name: "Annapolis", engineOptions: { maxAssessmentRatioDeviation: 0.5 }, lat: 38.9784, lng: -76.4922, provider: () => new MarylandProvider() },
   {
     jurisdiction: "fairfax", name: "McLean", lat: 38.94, lng: -77.161,
     provider: () => new FairfaxCountyProvider(), assessmentDate: FAIRFAX_ASSESSMENT_DATE,
@@ -110,7 +112,7 @@ async function collect(): Promise<Row[]> {
             assessedValue: s.assessedValue,
           },
           cands,
-          { asOf: dayBefore(s.soldDate) }
+          { asOf: dayBefore(s.soldDate), ...(m.engineOptions ?? {}) }
         );
         if (r.estimate === null) continue;
 
@@ -168,6 +170,26 @@ async function main() {
     const n = rows.filter(r => r.confidence === c).length;
     console.log(`  ${c.padEnd(12)} ${((n / rows.length) * 100).toFixed(0).padStart(3)}%  (${n})`);
   }
+
+  console.log(`\n${"═".repeat(104)}`);
+  console.log("THE SAME LABEL, PER JURISDICTION  — does 'low' mean the same thing everywhere?");
+  console.log("═".repeat(104));
+  for (const j of ["dc", "maryland", "fairfax"]) {
+    const jr = rows.filter(r => r.jurisdiction === j);
+    console.log(`  ${j}`);
+    for (const c of ["high", "medium", "low"]) {
+      const cr = jr.filter(r => r.confidence === c);
+      report(
+        `  ${c} ${cr.length ? `${((cr.length / jr.length) * 100).toFixed(0)}%` : ""}`,
+        cr
+      );
+    }
+  }
+  console.log(
+    "\n  WITHHELD share is what the publish gate suppresses in each jurisdiction.\n" +
+      "  If one source is gated far harder than the others while being no less\n" +
+      "  accurate at that label, the gate is costing coverage rather than buying trust."
+  );
 
   console.log(`\n${"═".repeat(104)}`);
   console.log("THE DECISION");
