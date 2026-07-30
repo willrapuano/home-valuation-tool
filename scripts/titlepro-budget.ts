@@ -48,7 +48,29 @@ const TARGETS: County[] = [
     parcelsUrl: "https://logis.loudoun.gov/gis/rest/services/COL/LandRecords/MapServer/5/query",
     method: "GET",
   },
+  {
+    // Alexandria publishes assessed value (TOT_CYR/LAND_CYR/IMP_CYR), address
+    // and lot size — more than Arlington or Loudoun give — but NO sale price
+    // or sale date anywhere in its services. Assessments without sales cannot
+    // produce comps, so it needs TitlePro247 like the others.
+    name: "alexandria",
+    parcelsUrl: "https://maps.alexandriava.gov/arcgis/rest/services/alxLandWm/MapServer/1/query",
+    method: "GET",
+  },
 ];
+
+/**
+ * NOT COUNTED HERE, and it matters for the total.
+ *
+ * Prince William County is the largest uncovered Northern Virginia
+ * jurisdiction and its GIS was not reachable to measure — gis.pwcgov.org and
+ * maps.pwcgov.org both refused connections, gisweb.pwcgov.org served HTML.
+ * At roughly 150,000 parcels it would add about 11,000 sales a year, which is
+ * more than a month's cap on its own.
+ *
+ * Count it before ordering. Do not treat the total below as complete.
+ */
+const UNMEASURED = ["prince william (~150,000 parcels, unreachable to confirm)"];
 
 /**
  * Fairfax is the calibration county: we hold its complete sales history AND
@@ -160,6 +182,11 @@ async function main() {
       `  owner in the radius — ${naive.toLocaleString()} parcels across these counties, ` +
       `${(naive / MONTHLY_CAP).toFixed(0)}x the\n` +
       `  monthly cap — to find the few thousand that actually sold.`
+  );
+
+  console.log(
+    `\n  NOT INCLUDED ABOVE: ${UNMEASURED.join("; ")}.\n` +
+      `  The total is therefore a floor, not the whole job.`
   );
 
   console.log(
