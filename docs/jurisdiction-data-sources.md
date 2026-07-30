@@ -216,6 +216,25 @@ fallback for a geocode landing on a street centreline, and it requests enough
 records that "nearest" is really the nearest. Fairfax always did it this way,
 which is why Fairfax was unaffected.
 
+**Fairfax had the same defect, in a worse form, and kept it for longer.** DC
+and Maryland were fixed first and Fairfax was left alone on the reasoning that
+it "always did containment first" — true of its first rung, and irrelevant to
+the rest. Its widened rungs asked for `resultRecordCount: 1` with no ordering,
+so when containment missed it took an *arbitrary* parcel within a tenth of a
+mile rather than the nearest. Measured live:
+
+| point | old (arbitrary) | new (nearest) | |
+|---|---|---|---|
+| McLean | 0.085mi, assessed **$7,626,500** | 0.018mi, assessed **$2,496,110** | 349 ft closer |
+| Springfield | 0.103mi, $668,350 | 0.012mi, $619,950 | 482 ft closer |
+| 7207 Statecrest Dr | returned nothing | 0.014mi, $829,670 | — |
+
+Fairfax publishes no characteristics, so its subject is nothing but that
+assessment — a wrong parcel is a wrong adjustment basis outright, with nothing
+to dilute it. The McLean case would have valued a home from a parcel assessed
+at three times the right figure. It fires on the ~14% of Fairfax lookups where
+containment misses.
+
 **The ladder is two rungs, and that bound is load-bearing.** A first attempt
 used four (0, 0.02, 0.05, 0.1). Each rung is a sequential round trip against a
 service that is occasionally slow, and Maryland measured 12.1s in Frederick and
