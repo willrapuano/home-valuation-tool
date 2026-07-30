@@ -257,8 +257,25 @@ async function valueFromCountyRecords(lat: number, lng: number) {
   // miss before it even started — measured at 17 seconds for Silver Spring
   // and 16 for a DC address covered by neither. Concurrently the request costs
   // the slowest single source instead of the sum of all of them.
-  const attempts = await Promise.all(candidates.map(c => attempt(c, location)));
-  return attempts.find(Boolean) ?? null;
+  // Start every covering source at once, then take the first BY PRIORITY that
+  // produced a valuation — without waiting for the ones behind it.
+  //
+  // This used to be `Promise.all(...).find(Boolean)`, which starts them
+  // concurrently and then waits for the slowest regardless. The boxes overlap
+  // on purpose, so an Annandale address is covered by Fairfax AND Maryland:
+  // Fairfax answered in ~3s and the request then sat for another ~4s waiting
+  // on a Maryland query that was always going to return nothing, because
+  // Annandale is in Virginia.
+  //
+  // Awaiting the already-started promises in priority order keeps the
+  // concurrency and drops the wait. Worst case is unchanged; the common case
+  // is the fastest covering source rather than the slowest.
+  const attempts = candidates.map(c => attempt(c, location));
+  for (const pending of attempts) {
+    const result = await pending;
+    if (result) return result;
+  }
+  return null;
 }
 
 /** Try one public-records source. Returns null if it cannot value the property. */
