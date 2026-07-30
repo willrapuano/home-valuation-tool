@@ -16,8 +16,32 @@ definition. Measured against production:
 | Before hedging | 3.31s | 14.56s |
 | After hedging | 3.95s | 10.54s |
 
-Hedging took the easy win by removing a serial retry. What remains is
-structural, and no cache in front of it will help:
+Hedging took the easy win by removing a serial retry.
+
+**Much of what was left turned out NOT to be structural, which this document
+asserted for weeks.** Two bugs were doing most of it, and both were found by
+timing production rather than by reasoning about the architecture:
+
+- The route ran covering providers concurrently and then **waited for all of
+  them** (`Promise.all(...).find(Boolean)`). The coverage boxes overlap on
+  purpose, so a Virginia address ran Fairfax *and* Maryland and sat on the
+  Maryland query long after Fairfax had answered.
+- Maryland's subject lookup issued a **containment query against a point
+  layer**, which can never match, and paid the full 8s provider timeout on
+  every valuation before falling through.
+
+Measured on production against the same addresses, before and after:
+
+| | before | after |
+|---|---|---|
+| Washington, DC | 9,483ms | **1,156ms** |
+| Annandale, VA | 11,145ms | **2,901ms** |
+| Rockville, MD | 5,365ms | 5,525ms |
+
+Maryland is unchanged because it *is* the slow provider — nothing to fall
+through to, and iMAP is genuinely slow. Everything else got 4–8x faster.
+
+What remains is structural, and no cache in front of it will help:
 
 1. **Cold serverless starts.**
 2. **Multiple upstream round trips per valuation.** Every request does a subject
@@ -25,7 +49,11 @@ structural, and no cache in front of it will help:
    parcels. That is 2–4 sequential network hops to a third party, per visitor.
 3. **A third party's latency is in our request path.** When Maryland iMAP is
    slow, our funnel is slow, and there is nothing we can do about it at
-   request time.
+   request time — Rockville above is exactly this.
+
+The case for ingesting still stands on points 1–3, on Maryland specifically,
+and on the coverage argument below. It no longer needs to carry the weight of
+two bugs.
 
 Caching a per-address result only helps the second person to ask about that
 exact house. Caching a comp *pool* per neighbourhood helps more, but only once
