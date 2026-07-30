@@ -124,13 +124,16 @@ properties, and it is the figure to quote:
 
 | Source | Coverage | Engine | **Product** | Shown to visitor |
 |---|---|---|---|---|
-| Washington, DC | citywide | 5.9% | **5.9%** | 81% |
+| Washington, DC | citywide | 4.7% | **4.7%** | 81% |
 | Fairfax County | 1 county | 5.4% | **7.2%** | 97% |
-| Maryland (SDAT) | all 24 jurisdictions | 6.9% | **8.0%** | 53% |
-| **all** | | 6.0% | **6.5%** | 77% |
+| Maryland (SDAT) | all 24 jurisdictions | 6.7% | **6.9%** | 68% |
+| **all** | | 5.8% | **6.4%** | 78% |
 
-*88 paired holdouts. "Shown" is how often an estimate clears the confidence
-gate; below it the tool offers a CMA rather than a number.*
+*124 paired holdouts across eight markets. "Shown" is how often an estimate
+clears the confidence gate; below it the tool offers a CMA rather than a number.
+Coverage varies more by market than by jurisdiction — Annandale publishes 100%,
+Bethesda 44% — so the per-market table in `docs/jurisdiction-data-sources.md`
+is the one to read before trusting an average.*
 
 The engine column, on larger per-source samples, is DC 4.5% / Fairfax 5.3% /
 Maryland 8.7%. Those describe the scoring, not what a homeowner receives — see

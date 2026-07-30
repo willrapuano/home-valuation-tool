@@ -37,13 +37,13 @@ These are two different numbers and conflating them has already cost dearly.
 
 | | engine (record subject) | product (live subject) | published | **error of what is shown** |
 |---|---|---|---|---|
-| Washington, DC | 5.9% | 5.9% | 81% | **5.9%** |
-| Maryland | 6.9% | 8.0% | 53% | **6.9%** |
+| Washington, DC | 4.7% | 4.7% | 81% | **4.7%** |
+| Maryland | 6.7% | 6.9% | 68% | **6.6%** |
 | Fairfax County | 5.4% | 7.2% | 97% | **7.5%** |
-| **all** | 6.0% | 6.5% | 77% | **6.4%** |
+| **all** | 5.8% | 6.4% | 78% | **6.1%** |
 
-*88 paired holdouts across six markets. Both columns are computed over the same
-properties — comparing each over whatever it happened to answer reports a
+*124 paired holdouts across eight markets. Both columns are computed over the
+same properties — comparing each over whatever it happened to answer reports a
 difference in which homes were valued as a difference in accuracy, the same
 survivorship error that made a tight search radius look good in
 `adaptive-radius.ts`.*
@@ -54,16 +54,47 @@ it is not available to production, which has only a latitude and longitude.
 
 **Product** resolves the subject the way a request does, through
 `lookupSubject`. The gap between the columns is subject-lookup quality. DC's is
-now zero, at 100% exact-parcel resolution — before the containment fix it was
-+12.9pp. Fairfax's remaining 1.7pp tracks its 86% exact rate: it publishes no
+now zero at 100% exact-parcel resolution — before the containment fix it was
++12.9pp. Fairfax's 1.7pp tracks its 86% exact rate: it publishes no
 characteristics, so the subject is nothing but the assessment, and a wrong
-parcel means a wrong adjustment basis directly.
+parcel is a wrong adjustment basis directly.
 
-**Published** is how often a homeowner sees anything at all;
-`shouldPublishEstimate` withholds low confidence. Maryland showing 53% is the
-largest coverage problem in the tool — roughly half of Maryland visitors get no
-number — and it is a bigger gap than DC's, which was the one that looked
-alarming from a handful of hand-picked points.
+### Two ways this measurement lied before it was trusted
+
+Both are recorded because both are easy to repeat.
+
+**It compared different subsets.** Taking each column's median over whatever
+that column happened to produce reported Maryland at +3.9pp — impossible, since
+a field-by-field diff showed the subject data identical through both paths on
+the correct parcel every time. Where `lookupSubject` failed, the property
+counted in one column and not the other. Paired, the gap is +0.3pp.
+
+**It counted its own load as the product failing.** With one attempt per
+lookup, Maryland appeared to publish 53% — half its visitors getting nothing.
+A backtest issues hundreds of requests in a tight loop and iMAP rate-limits it;
+production issues one. With retries, upstream errors go to 0% and the figure is
+68%. Upstream failures are now reported in their own column, because "this
+source is flaky under load" and "this source cannot value this home" are
+different problems.
+
+### Coverage varies more by market than by jurisdiction
+
+| market | published |
+|---|---|
+| fairfax/Annandale | 100% |
+| fairfax/McLean | 94% |
+| dc/Capitol Hill | 89% |
+| dc/Petworth | 78% |
+| maryland/Rockville | 78% |
+| maryland/Frederick | 75% |
+| maryland/Columbia | 72% |
+| **maryland/Bethesda** | **44%** |
+
+Bethesda is the outlier, not Maryland — expensive and heterogeneous, so comps
+disagree, dispersion rises and `scoreConfidence`'s agreement cap withholds the
+result. Quoting a jurisdiction average would have hidden a market where more
+than half of visitors get no number. Maryland measured on Rockville and
+Bethesda alone reads 61%; across four markets, 68%.
 
 Re-run this after any change to a provider's `lookupSubject`, candidate query,
 or the publish gate. The older per-jurisdiction figures (DC 4.5%, Fairfax 5.3%,

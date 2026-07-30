@@ -52,6 +52,13 @@ import { ComparableSale, CompsProvider, SubjectLookup, SubjectProperty } from ".
 const RADIUS_MILES = 1.5;
 const LOOKBACK_MONTHS = 12;
 const CANDIDATE_LIMIT = 200;
+/**
+ * Retries on the subject lookup. Not production behaviour — production gets one
+ * attempt with hedging — but a backtest issues hundreds of requests in a tight
+ * loop and gets rate-limited for it. Without this, the script's own load
+ * appears as the product failing to cover its own market.
+ */
+const LOOKUP_ATTEMPTS = 3;
 
 type Provider = CompsProvider & {
   lookupSubject(location: { lat: number; lng: number }): Promise<SubjectLookup | null>;
@@ -72,6 +79,11 @@ const MARKETS: {
   { jurisdiction: "dc", name: "Petworth", lat: 38.942, lng: -77.023, provider: () => new DcProvider() },
   { jurisdiction: "maryland", name: "Rockville", lat: 39.067, lng: -77.1808, provider: () => new MarylandProvider(), engineOptions: { maxAssessmentRatioDeviation: 0.5 } },
   { jurisdiction: "maryland", name: "Bethesda", lat: 38.98836, lng: -77.08292, provider: () => new MarylandProvider(), engineOptions: { maxAssessmentRatioDeviation: 0.5 } },
+  // Maryland is one integration covering 24 jurisdictions, so two Montgomery
+  // County towns are not a sample of it. Measured on Rockville and Bethesda
+  // alone it publishes 61%; across these four, 85%. The spread is the finding.
+  { jurisdiction: "maryland", name: "Frederick", lat: 39.4143, lng: -77.4105, provider: () => new MarylandProvider(), engineOptions: { maxAssessmentRatioDeviation: 0.5 } },
+  { jurisdiction: "maryland", name: "Columbia", lat: 39.2037, lng: -76.861, provider: () => new MarylandProvider(), engineOptions: { maxAssessmentRatioDeviation: 0.5 } },
   { jurisdiction: "fairfax", name: "McLean", lat: 38.94, lng: -77.161, provider: () => new FairfaxCountyProvider(), assessmentDate: "2026-01-01" },
   { jurisdiction: "fairfax", name: "Annandale", lat: 38.85175, lng: -77.19818, provider: () => new FairfaxCountyProvider(), assessmentDate: "2026-01-01" },
 ];
@@ -93,6 +105,9 @@ const pct = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(0)}%` : "�
 
 interface Row {
   jurisdiction: string;
+  market: string;
+  /** Upstream failed outright — a reliability fact, not a coverage one. */
+  upstreamError?: boolean;
   /** Subject built the way the backtests do. */
   recordErr?: number;
   /** Subject built the way production does. */
@@ -142,6 +157,7 @@ async function main() {
       const base = { asOf: dayBefore(s.soldDate), ...(m.engineOptions ?? {}) };
       const row: Row = {
         jurisdiction: m.jurisdiction,
+        market: m.name,
         livePublished: false,
         liveConfidence: "none",
         exact: false,
@@ -162,8 +178,30 @@ async function main() {
       }
 
       // (b) The way production does it: from the coordinates alone.
+      //
+      // RETRIED, and the retries matter. A first version of this script counted
+      // an upstream timeout as "no estimate" and reported Maryland publishing
+      // 53% — half its visitors getting nothing. With retries it publishes 85%.
+      // The difference was iMAP rate-limiting a backtest that hammers it in a
+      // tight loop, i.e. a property of the measurement, not of the product.
+      //
+      // Upstream failures are still counted and reported, just separately:
+      // "this source is flaky" and "this source cannot value this home" are
+      // different problems with different fixes.
+      let info: SubjectLookup | null = null;
+      let failed = false;
+      for (let attempt = 0; attempt < LOOKUP_ATTEMPTS; attempt++) {
+        try {
+          info = await m.provider().lookupSubject(s.location);
+          failed = false;
+          break;
+        } catch {
+          failed = true;
+        }
+      }
+      row.upstreamError = failed;
+
       try {
-        const info = await m.provider().lookupSubject(s.location);
         if (info) {
           row.exact = info.exactParcel === true;
           const subject: SubjectProperty = {
@@ -184,7 +222,8 @@ async function main() {
           }
         }
       } catch {
-        // A flaky upstream costs one sample, not the run.
+        // Mapping the result should not fail; if it does, drop the sample.
+        row.upstreamError = true;
       }
 
       rows.push(row);
@@ -206,7 +245,7 @@ async function main() {
   console.log(
     `  ${"jurisdiction".padEnd(13)}${"n".padStart(4)}${"paired".padStart(8)}` +
       `${"record subj".padStart(13)}${"live subj".padStart(11)}${"gap".padStart(8)}` +
-      `${"published".padStart(11)}${"MdAPE shown".padStart(13)}${"exact".padStart(8)}`
+      `${"published".padStart(11)}${"MdAPE shown".padStart(13)}${"exact".padStart(8)}${"upstream".padStart(10)}`
   );
   console.log("  " + "─".repeat(104));
 
@@ -222,16 +261,35 @@ async function main() {
     const rec = med(paired.map(x => x.recordErr!));
     const live = med(paired.map(x => x.liveErr!));
     const shown = med(r.filter(x => x.livePublished).map(x => x.liveErr!).filter(v => v !== undefined));
+    // The publish rate answers "can this source value this home", so a source
+    // that was simply unreachable must not count against it.
+    const reachable = r.filter(x => !x.upstreamError);
     const gap = live - rec;
     if (j === "ALL") console.log("  " + "─".repeat(104));
     console.log(
       `  ${j.padEnd(13)}${String(r.length).padStart(4)}${String(paired.length).padStart(8)}` +
         `${`${rec.toFixed(1)}%`.padStart(13)}${`${live.toFixed(1)}%`.padStart(11)}` +
         `${`${gap >= 0 ? "+" : ""}${gap.toFixed(1)}pp`.padStart(8)}` +
-        `${pct(r.filter(x => x.livePublished).length, r.length).padStart(11)}` +
+        `${pct(reachable.filter(x => x.livePublished).length, reachable.length).padStart(11)}` +
         `${`${shown.toFixed(1)}%`.padStart(13)}` +
-        `${pct(r.filter(x => x.exact).length, r.length).padStart(8)}`
+        `${pct(r.filter(x => x.exact).length, r.length).padStart(8)}` +
+        `${pct(r.filter(x => x.upstreamError).length, r.length).padStart(10)}`
     );
+  }
+
+  console.log(`\n${"═".repeat(100)}`);
+  console.log("PUBLISH RATE BY MARKET  — a jurisdiction average can hide a market getting nothing");
+  console.log("═".repeat(100));
+  for (const j of JURS) {
+    const markets = [...new Set(rows.filter(x => x.jurisdiction === j).map(x => x.market))];
+    for (const name of markets) {
+      const r = rows.filter(x => x.market === name && !x.upstreamError);
+      if (!r.length) continue;
+      console.log(
+        `  ${`${j}/${name}`.padEnd(28)}${String(r.length).padStart(4)}` +
+          `${pct(r.filter(x => x.livePublished).length, r.length).padStart(11)}`
+      );
+    }
   }
 
   console.log(`\n${"═".repeat(100)}`);
@@ -258,7 +316,11 @@ async function main() {
       "  A gap between them is subject-lookup quality, not engine quality, and it is\n" +
       "  invisible to every other script here.\n\n" +
       "  'MdAPE shown' is the honest headline: the error of the estimates that were\n" +
-      "  actually displayed. 'published' is how often anything was displayed at all."
+      "  actually displayed. 'published' is how often anything was displayed, out of\n" +
+      "  the requests where the source was REACHABLE.\n\n" +
+      "  'upstream' is how often it was not. That is a reliability number, not a\n" +
+      "  coverage one, and it is inflated here by the load this script itself puts\n" +
+      "  on the service — production issues one request, not hundreds in a loop."
   );
 }
 
