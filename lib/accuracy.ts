@@ -98,11 +98,44 @@
  * subject. That is a third independent reason fresh records would not move
  * coverage.
  *
- * The dial that WOULD move it is substitutability, and it is paid for in
- * accuracy: admitting condo sales as comps for a house buys published estimates
- * by making them worse. Anyone reaching for it should measure the trade rather
- * than assume it, and should weigh it against mailed mode — the third who see
- * no number are that path's designed constituency.
+ * BUT THE TALLY MISRANKS THE DIALS, because a comp killed by type at 0.4mi may
+ * fail the ratio test too. Priced per-subject instead — relax one rule, re-run
+ * the publish gate, count subjects that newly publish (n=15 failing):
+ *
+ *     radius 1.5 -> 3.0mi                3  (20%)
+ *     size band 0.65-1.5 -> 0.5-2.0      2  (13%)
+ *     type: allow any dwelling           1  ( 7%)
+ *     ratio band 0.5 -> 1.0              0  ( 0%)
+ *
+ * Property type led the knockout tally with 1,217 comps and is worth ONE
+ * subject. Per-comp counts overstate any single rule; only the counterfactual
+ * prices it.
+ *
+ * AND NO DIAL IS A FIX. The best of them recovers a fifth of the starved third
+ * even at triple the radius. These subjects do not have comps at any defensible
+ * setting, which is what "median of one surviving comp" already implied.
+ *
+ * WHO STARVES:
+ *
+ *     subject type      n   failed   fail rate   share of failures
+ *     single_family    38        7         18%                 47%
+ *     condo            12        5         42%                 33%
+ *     townhouse        15        3         20%                 20%
+ *
+ * Condos fail at the highest RATE, detached houses are the largest SHARE. Both
+ * worlds are real; there is no clean fork.
+ *
+ * NOT TESTED, and it is the one branch that could buy coverage and accuracy
+ * together: condo-native comping — same building first, same complex second,
+ * project identity over radius. The counterfactual above only removed the
+ * substitutability penalty, which is the UPPER BOUND on getting more comps of
+ * the wrong kind. Same-building comping is a different mechanism (better comps,
+ * not more) and needs building identity the provider does not currently extract.
+ * Worth pricing before anyone loosens `isSubstitutable`, which is never
+ * defensible for condo-for-house.
+ *
+ * Meanwhile the starved third are exactly where human comping judgment is the
+ * value. Mailed mode is not the fallback for them; it is the design.
  *
  * (`lag-cost.ts` shows a `valued` column falling 93% -> 73% with lag. That is
  * NOT this quantity: it is pooled across all three jurisdictions, and it counts
