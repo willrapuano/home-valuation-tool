@@ -74,6 +74,15 @@ export interface ReportValuation {
   high?: number | null;
   confidence: string;
   source: string;
+  /**
+   * Which public-records provider served it — "dc", "fairfax", "maryland".
+   *
+   * Carried so the report can state the measured error band for the right
+   * jurisdiction. `source` is no substitute: it reads "county-comps" for every
+   * county alike. Absent on links generated before this field existed, in which
+   * case lib/accuracy.ts falls back to the pooled figure.
+   */
+  sourceJurisdiction?: string;
   degraded?: boolean;
   degradedReason?: string;
   beds?: number | null;

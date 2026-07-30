@@ -20,6 +20,16 @@ export const agent = {
   license: process.env.NEXT_PUBLIC_AGENT_LICENSE || "VA License 0225203164",
   /** Optional; the agent card falls back to initials when absent. */
   headshot: process.env.NEXT_PUBLIC_AGENT_HEADSHOT || "/candee-headshot.png",
+  /**
+   * Which market's live figures the landing page shows. A key from
+   * lib/markets.ts — "fairfax", "dc", "montgomery", …
+   *
+   * This is per-tenant for the same reason the licence number is: the hero
+   * statistics were hardcoded to Fairfax, so a Bethesda agent's visitors read
+   * Fairfax medians. An unrecognised value shows the coverage panel instead,
+   * which is the safe direction to fail in.
+   */
+  market: process.env.NEXT_PUBLIC_AGENT_MARKET || "fairfax",
 } as const;
 
 /** First name only, for the conversational copy on the lead gate. */

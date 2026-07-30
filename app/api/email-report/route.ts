@@ -38,6 +38,7 @@ function buildReportUrl(body: {
   fmr?: { studio: number; oneBr: number; twoBr: number; threeBr: number; fourBr: number };
   areaMedianIncome?: number | null;
   source?: string;
+  sourceJurisdiction?: string;
   degraded?: boolean;
   degradedReason?: string;
   comps?: ReportComp[];
@@ -52,6 +53,9 @@ function buildReportUrl(body: {
       // Carry the real provenance through — this used to be hardcoded, so a
       // ZIP-average fallback was labelled as a property-level AVM in the report.
       source: body.source ?? "estimate",
+      // Which county served it, so the report can state the measured error band
+      // for the right jurisdiction rather than the pooled one.
+      sourceJurisdiction: body.sourceJurisdiction,
       degraded: body.degraded ?? false,
       degradedReason: body.degradedReason,
       beds: body.beds,
@@ -89,6 +93,7 @@ export async function POST(req: NextRequest) {
     fmr,
     areaMedianIncome,
     source,
+    sourceJurisdiction,
     degraded,
     degradedReason,
     comps,
@@ -122,6 +127,7 @@ export async function POST(req: NextRequest) {
     fmr,
     areaMedianIncome,
     source,
+    sourceJurisdiction,
     degraded,
     degradedReason,
     comps,

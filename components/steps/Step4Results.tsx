@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import { AddressData, LeadData, ValuationData } from "../HomeValuationFlow";
 import PreparingValuation from "./PreparingValuation";
 import { agent, agentFirstName } from "@/lib/agent";
+import { accuracyLine, formatEstimate, jurisdictionLabel } from "@/lib/accuracy";
 
 interface Props {
   address: AddressData;
@@ -73,24 +74,6 @@ export default function Step4Results({ address, valuation, lead, onStartOver }: 
 
 /** A valuation that actually produced a number. */
 type ResolvedValuation = ValuationData & { estimate: number; low: number; high: number };
-
-/**
- * Provider keys are internal slugs. Printed raw they read as "Dc" — the
- * jurisdiction is worth showing, but under the name a homeowner would use.
- */
-const JURISDICTION_NAMES: Record<string, string> = {
-  dc: "Washington, DC",
-  fairfax: "Fairfax County, VA",
-  maryland: "Maryland State records",
-  postgres: "Ingested public records",
-  titleflex: "TitleFlex",
-  titlepro247: "TitlePro247",
-};
-
-function jurisdictionLabel(key?: string | null): string {
-  if (!key) return "Public records";
-  return JURISDICTION_NAMES[key.toLowerCase()] ?? key;
-}
 
 /**
  * The sales behind the number.
@@ -266,6 +249,9 @@ function FullResults({
           fmr: valuation.fmr,
           areaMedianIncome: valuation.areaMedianIncome,
           source: valuation.source,
+          // Needed for the report's error band; `source` is "county-comps" for
+          // every county alike and cannot distinguish them.
+          sourceJurisdiction: valuation.sourceJurisdiction,
           degraded: valuation.degraded,
           degradedReason: valuation.degradedReason,
           // So the shared report shows the same sales as this screen. The
@@ -314,10 +300,21 @@ function FullResults({
       {/* ── The number, and the address it belongs to ──────────────── */}
       <header>
         <p className="eyebrow">Estimated market value</p>
+        {/*
+          ROUNDED, ON PURPOSE. This printed $1,951,882 — seven significant
+          digits on a figure whose measured median error in this jurisdiction is
+          several percent. That is asserting a precision the backtest says we do
+          not have, and it contradicts the accuracy section on the landing page.
+          Three significant figures, with the measured band stated underneath.
+        */}
         <p className="mt-3 font-serif text-5xl md:text-6xl text-ink tnum leading-none">
-          {formatCurrency(valuation.estimate)}
+          {formatEstimate(valuation.estimate)}
         </p>
-        <p className="mt-4 text-lg text-ink">{streetLine}</p>
+        <p className="mt-2 text-[15px] text-ink-muted tnum">
+          {accuracyLine(valuation.estimate, valuation.sourceJurisdiction)}
+        </p>
+
+        <p className="mt-5 text-lg text-ink">{streetLine}</p>
         <p className="text-ink-muted">
           {address.city}
           {address.city ? ", " : ""}
@@ -325,8 +322,18 @@ function FullResults({
         </p>
 
         <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">
-          <span className="text-[15px] text-ink tnum">
-            Likely range {formatCurrency(valuation.low)} – {formatCurrency(valuation.high)}
+          {/*
+            NOT a confidence interval, and no longer labelled as one. `low` and
+            `high` come out of reconcile() as the weighted dispersion of the
+            adjusted comps — how much the sales disagree with each other, which
+            is a different quantity from how far the estimate lands from the
+            eventual sale price. Printing them next to the measured band above
+            under the label "likely range" invited them to be read as the same
+            thing, and they are typically four times wider.
+          */}
+          <span className="text-[15px] text-ink-muted tnum">
+            The sales themselves spread {formatEstimate(valuation.low)} –{" "}
+            {formatEstimate(valuation.high)}
           </span>
           <ConfidenceBadge confidence={valuation.confidence} />
         </div>
@@ -491,7 +498,7 @@ function FullResults({
             <p className="mt-3 text-[15px] leading-relaxed text-ink-muted max-w-2xl">
               Public record does not know whether your kitchen was redone, how the light
               falls, or what the lot backs onto — and those routinely move the number by
-              more than the range above. {agent.name} will walk the property, tell you which
+              more than the band above. {agent.name} will walk the property, tell you which
               of the sales above are genuinely comparable and which are not, and give you a
               figure she would be willing to list at.
             </p>
@@ -502,8 +509,16 @@ function FullResults({
               <a href={`mailto:${agent.email}`} className="text-navy font-medium hover:underline">
                 {agent.email}
               </a>
-              <span className="text-ink-faint text-sm">{agent.license}</span>
             </div>
+            {/*
+              Brokerage sits WITH the licence, not only in the page footer.
+              VA, MD and DC advertising rules all require the brokerage's name
+              on agent-branded advertising, and this block is what a homeowner
+              screenshots and forwards.
+            */}
+            <p className="mt-3 text-sm text-ink-faint">
+              {agent.brokerage} · {agent.license}
+            </p>
           </div>
         </div>
       </section>

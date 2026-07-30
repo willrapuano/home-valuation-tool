@@ -3,6 +3,9 @@
 import AddressSearch, { AddressData } from "../AddressSearch";
 import type { MarketPulse } from "@/lib/market-pulse";
 import { agent, agentFirstName } from "@/lib/agent";
+// One source for the backtest figures, shared with the results screen and the
+// report so the three can never quote different numbers at each other.
+import { ACCURACY, JURISDICTION_ERROR_PCT, jurisdictionLabel } from "@/lib/accuracy";
 
 /**
  * The landing page.
@@ -113,23 +116,44 @@ function Hero({ onSubmit, initialError, pulse }: Props) {
  * county's own site, which "100% Private" could never offer.
  */
 function MarketPanel({ pulse }: { pulse: MarketPulse }) {
+  const through = new Date(`${pulse.through}T12:00:00Z`).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
   return (
     <aside className="card-raised rounded-lg p-7">
-      <p className="eyebrow">Fairfax County · last {pulse.windowDays} days</p>
+      <p className="eyebrow">
+        {pulse.market} · {pulse.windowDays} days to {through}
+      </p>
 
       <dl className="mt-6 space-y-6">
         <div>
           <dd className="font-serif text-4xl text-ink tnum">
             {pulse.sales.toLocaleString()}
           </dd>
-          <dt className="text-sm text-ink-muted mt-1">Arm&apos;s-length home sales recorded</dt>
+          {/*
+            Only Fairfax publishes a sale-validity flag we can filter on in SQL.
+            DC's parcel layer carries none, so its count includes family
+            transfers — the wording has to follow the data rather than the other
+            way round.
+          */}
+          <dt className="text-sm text-ink-muted mt-1">
+            {pulse.armsLength ? "Arm’s-length home sales recorded" : "Home sales recorded"}
+          </dt>
         </div>
-        <div>
-          <dd className="font-serif text-4xl text-ink tnum">
-            ${pulse.medianPrice.toLocaleString()}
-          </dd>
-          <dt className="text-sm text-ink-muted mt-1">Median sale price</dt>
-        </div>
+        {/* Omitted rather than faked when the median query timed out — see
+            lib/market-pulse.ts. The counts still stand on their own. */}
+        {pulse.medianPrice !== null && (
+          <div>
+            <dd className="font-serif text-4xl text-ink tnum">
+              ${pulse.medianPrice.toLocaleString()}
+            </dd>
+            <dt className="text-sm text-ink-muted mt-1">Median sale price</dt>
+          </div>
+        )}
       </dl>
 
       <div className="mt-7 pt-6 border-t border-rule">
@@ -137,18 +161,12 @@ function MarketPanel({ pulse }: { pulse: MarketPulse }) {
           <span className="tnum font-medium text-ink">
             {pulse.salesOnFile.toLocaleString()}
           </span>{" "}
-          sales from the last twelve months are on file for Fairfax County alone. Your
+          sales from the preceding twelve months are on file for {pulse.market} alone. Your
           estimate is drawn from the ones nearest and most like your home.
         </p>
         <p className="mt-3 text-xs text-ink-faint">
-          Read from Fairfax County public records on{" "}
-          {new Date(`${pulse.asOf}T12:00:00Z`).toLocaleDateString("en-US", {
-            month: "long",
-            day: "numeric",
-            year: "numeric",
-            timeZone: "UTC",
-          })}
-          .
+          Read from {pulse.market} public records. The window ends at the newest recorded
+          sale, not at today&apos;s date.
         </p>
       </div>
     </aside>
@@ -251,16 +269,23 @@ function Accuracy() {
               How close it gets, measured
             </h2>
             <p className="mt-5 text-[15px] leading-relaxed text-ink-muted">
-              The engine was tested against 124 homes that had actually sold, selected at
-              random across eight markets. Each was valued from the sales around it with its
-              own sale price withheld, then compared against what it really sold for.
+              The engine was tested against {ACCURACY.sampleSize} homes that had actually
+              sold, selected at random across {ACCURACY.marketCount} markets. Each was valued
+              from the sales around it with its own sale price withheld, then compared against
+              what it really sold for.
             </p>
             <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">
-              Half the estimates landed within {ACCURACY.median} of the true price. Where the
-              nearby sales are too few or too dissimilar for that to hold, no number is shown
-              at all — which happens about {100 - ACCURACY.publishRate}% of the time, and
-              always in the jurisdictions that publish no sale prices. Those requests go to{" "}
-              {agentFirstName} to prepare by hand.
+              Half the estimates landed within {ACCURACY.medianErrorPct}% of the true price.
+              Where the nearby sales are too few or too dissimilar for that to hold, no number
+              is shown at all — which happens about {100 - ACCURACY.publishRatePct}% of the
+              time, and always in the jurisdictions that publish no sale prices. Those
+              requests go to {agentFirstName} to prepare by hand.
+            </p>
+            <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">
+              This is why your estimate is shown rounded, with its band underneath. Printing{" "}
+              <span className="tnum">$1,951,882</span> on a figure that is typically{" "}
+              {ACCURACY.medianErrorPct}% out would be asserting precision we have measured
+              ourselves not to have.
             </p>
           </div>
 
@@ -280,10 +305,10 @@ function Accuracy() {
                 </tr>
               </thead>
               <tbody>
-                {ACCURACY.byJurisdiction.map(row => (
-                  <tr key={row.name} className="border-b border-rule last:border-0">
-                    <td className="px-5 py-3.5 text-ink">{row.name}</td>
-                    <td className="px-5 py-3.5 text-right text-ink tnum">{row.error}</td>
+                {Object.entries(JURISDICTION_ERROR_PCT).map(([key, pct]) => (
+                  <tr key={key} className="border-b border-rule last:border-0">
+                    <td className="px-5 py-3.5 text-ink">{jurisdictionLabel(key)}</td>
+                    <td className="px-5 py-3.5 text-right text-ink tnum">{pct}%</td>
                   </tr>
                 ))}
               </tbody>
@@ -299,20 +324,6 @@ function Accuracy() {
     </section>
   );
 }
-
-/**
- * Backtest figures, kept together so there is one place to change them when the
- * engine is re-measured. See scripts/production-path-backtest.ts.
- */
-const ACCURACY = {
-  median: "6.1%",
-  publishRate: 78,
-  byJurisdiction: [
-    { name: "Washington, DC", error: "4.7%" },
-    { name: "Maryland", error: "6.6%" },
-    { name: "Fairfax County, VA", error: "7.5%" },
-  ],
-};
 
 /* ----------------------------------------------------------------- agent -- */
 

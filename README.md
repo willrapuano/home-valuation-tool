@@ -220,10 +220,45 @@ footer ink, gold is a hairline accent and never body text on a light surface
 (`#C9A84C` on white is about 2:1 contrast — use `gold-deep` if a gold-toned word
 is genuinely wanted). Headlines are set in Source Serif, body in Inter.
 
-The landing page is a server component with `revalidate = 3600`. It reads live
-Fairfax County sale counts through `lib/market-pulse.ts`, which has a hard
-timeout and returns `null` on any failure — the hero then renders a coverage
-panel instead. Nothing on the page is allowed to block or fail the render.
+The landing page is a server component with `revalidate = 86400`. It reads live
+county sale counts through `lib/market-pulse.ts`, which has a hard timeout and
+returns `null` on any failure — the hero then renders a coverage panel instead.
+Nothing on the page is allowed to block or fail the render.
+
+**Daily, not hourly, and never per pageview.** Getting a true median costs a
+paginated ArcGIS query, and county services rate-limit; their rate limit would
+become this page's latency. Market statistics do not move intra-day, so one
+rebuild a day is the right granularity — four requests per day per deployment.
+
+**Which market is per-tenant** (`NEXT_PUBLIC_AGENT_MARKET`, keys in
+`lib/markets.ts`). The figures were hardcoded to Fairfax, so a Bethesda agent's
+visitors read Fairfax medians. An unrecognised key falls back to the coverage
+panel rather than to another county's numbers.
+
+**The window is anchored to the newest sale on file, not to today.** Measured
+2026-07-30: the Maryland state sales feed's newest transfer was 2026-04-30 —
+three months behind. A fixed "last 90 days" would have reported *zero* sales for
+every Maryland tenant. Anchoring to the data always produces a real window and
+makes the lag visible rather than hiding it. This lag applies to the valuation
+engine's Maryland comps too, not just to the hero.
+
+### Displayed precision
+
+`lib/accuracy.ts` is the single source for the backtest figures and for how the
+estimate is rendered. The results screen used to print `$1,951,882` — seven
+significant digits on a number whose measured median error is 6.1%, roughly
+±$119,000. That is asserting precision the backtest says we do not have, and it
+contradicted the accuracy section on the landing page.
+
+The headline is now three significant figures (`$1.95M`) with the measured band
+for that jurisdiction underneath it (`give or take $92,000 — half of Washington,
+DC estimates land within 4.7% of the sale price`).
+
+`low`/`high` from the engine are **not** a confidence interval and are no longer
+labelled as one. They come out of `reconcile()` as the weighted dispersion of
+the adjusted comps — how much the sales disagree with each other — which is a
+different quantity, typically about four times wider. They read "the sales
+themselves spread X – Y".
 
 ---
 
@@ -260,17 +295,41 @@ prepared-CMA screen.
 
 ## Reselling to Other Agents
 
-To deploy for a new agent, update these env vars:
-- `NEXT_PUBLIC_AGENT_NAME`
-- `NEXT_PUBLIC_AGENT_EMAIL`
-- `NEXT_PUBLIC_AGENT_PHONE`
-- `NEXT_PUBLIC_AGENT_BROKERAGE`
-- `NEXT_PUBLIC_AGENT_LICENSE`
-- `GHL_API_KEY` (agent's GHL account)
-- Replace `/public/candee-headshot.png` with agent headshot
+Every branded string is read from `lib/agent.ts`, which reads these. Nothing
+outside that module should mention an agent by name.
 
-Note: agent details are currently still hardcoded in `HomeValuationFlow.tsx` and
-`Step4Results.tsx`. Wiring them to the env vars above is a prerequisite for resale.
+| Variable | Notes |
+| --- | --- |
+| `NEXT_PUBLIC_AGENT_NAME` | |
+| `NEXT_PUBLIC_AGENT_EMAIL` | |
+| `NEXT_PUBLIC_AGENT_PHONE` | |
+| `NEXT_PUBLIC_AGENT_BROKERAGE` | **Required.** VA/MD/DC advertising rules require the brokerage's name on agent-branded advertising. Rendered in the header, footer, agent card, results screen and shareable report. |
+| `NEXT_PUBLIC_AGENT_LICENSE` | Rendered alongside the brokerage, not separately from it. |
+| `NEXT_PUBLIC_AGENT_HEADSHOT` | Path under `public/`. Hides itself if missing. |
+| `NEXT_PUBLIC_AGENT_MARKET` | Which county's live figures the hero shows. See `lib/markets.ts`. |
+| `GHL_API_KEY` | The agent's own GHL account. |
+
+---
+
+## Fulfillment: the mailed CMA
+
+Settled, so it does not get rebuilt here by mistake:
+
+- **The PDF renders in `velocity-connectors`.** A WeasyPrint CMA renderer already
+  exists there. Do not build a second one in this repo.
+- **The Thanks.io account is a platform account**, with credentials alongside the
+  connectors — not per agent, and not in this repo's environment.
+- **It is a review queue, not auto-send**, gated behind `FULFILLMENT_MODE`. A
+  person approves each piece before it goes to post.
+
+What this repo owes that pipeline is the lead plus the comps behind it, which is
+what `/api/lead` and `/api/email-report` already carry. `VALUATION_MODE=mailed`
+is the switch that stops showing a figure on screen; see `lib/valuation-mode.ts`.
+
+`DATABASE_URL` remains unset and is the account owner's to provide. Until it is,
+`scripts/ingest.ts` has nowhere to write, the ingest table stays empty, and every
+lookup queries the county services live. `scripts/ingest-status.ts` exits green
+in that state rather than failing the scheduled workflow.
 
 ---
 

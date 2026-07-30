@@ -9,6 +9,12 @@ import {
   ReportValuation,
 } from "@/lib/report-payload";
 import { agent, agentFirstName } from "@/lib/agent";
+import {
+  accuracyLine,
+  errorPctFor,
+  formatErrorBand,
+  formatEstimate,
+} from "@/lib/accuracy";
 
 // The payload shape is defined once, in lib/report-payload.ts, and shared with
 // the route that writes it — it used to be re-declared here by hand and had
@@ -288,6 +294,10 @@ function ReportContent() {
   // Proxied so the Maps key stays server-side.
   const streetViewUrl = `/api/streetview?location=${encodeURIComponent(address.full)}`;
 
+  // Absent on links generated before the payload carried it, in which case the
+  // error band falls back to the pooled figure rather than guessing a county.
+  const jurisdiction = valuation.sourceJurisdiction;
+
   /*
    * NO STATIC RENT FALLBACK.
    *
@@ -329,10 +339,17 @@ function ReportContent() {
 
       <main className="flex-1 max-w-3xl w-full mx-auto px-5 sm:px-8 py-10 md:py-14">
         <p className="eyebrow">Estimated market value</p>
+        {/* Rounded for the same reason as the results screen — see lib/accuracy.ts.
+            This is the artifact that gets forwarded, so it is the last place
+            false precision should survive. */}
         <p className="mt-3 font-serif text-5xl md:text-6xl text-ink tnum leading-none">
-          {formatCurrency(valuation.estimate)}
+          {formatEstimate(valuation.estimate)}
         </p>
-        <p className="mt-4 text-lg text-ink">{streetLine}</p>
+        <p className="mt-2 text-[15px] text-ink-muted tnum">
+          {accuracyLine(valuation.estimate, jurisdiction)}
+        </p>
+
+        <p className="mt-5 text-lg text-ink">{streetLine}</p>
         <p className="text-ink-muted">
           {address.city}
           {address.city ? ", " : ""}
@@ -340,8 +357,10 @@ function ReportContent() {
         </p>
 
         <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">
-          <span className="text-[15px] text-ink tnum">
-            Likely range {formatCurrency(valuation.low)} – {formatCurrency(valuation.high)}
+          {/* Comp dispersion, not a confidence interval. See Step4Results. */}
+          <span className="text-[15px] text-ink-muted tnum">
+            The sales themselves spread {formatEstimate(valuation.low)} –{" "}
+            {formatEstimate(valuation.high)}
           </span>
           <ConfidenceBadge confidence={valuation.confidence} />
         </div>
@@ -387,10 +406,16 @@ function ReportContent() {
           <div>
             <h2 className="font-serif text-2xl text-ink">Market context</h2>
             <dl className="mt-4">
+              {/* Labelled for what it is. These are the adjusted comps' spread,
+                  not a confidence interval around the estimate. */}
               <Row
-                label="Likely range"
-                value={`${formatCurrency(valuation.low)} – ${formatCurrency(valuation.high)}`}
-                note={`± ${formatCurrency(Math.round((valuation.high - valuation.low) / 2))}`}
+                label="Spread of the sales"
+                value={`${formatEstimate(valuation.low)} – ${formatEstimate(valuation.high)}`}
+              />
+              <Row
+                label="Typical error here"
+                value={`± ${formatErrorBand(valuation.estimate, jurisdiction)}`}
+                note={`${errorPctFor(jurisdiction)}%, measured on held-out sales`}
               />
               {pricePerSqft ? (
                 <Row label="Price per sqft" value={`$${pricePerSqft.toLocaleString()}`} />
@@ -435,7 +460,7 @@ function ReportContent() {
               <h2 className="font-serif text-2xl text-ink">Where this estimate is likely wrong</h2>
               <p className="mt-3 text-[15px] leading-relaxed text-ink-muted max-w-2xl">
                 Public record cannot see condition, renovations or finishes, and those
-                routinely move the number by more than the range above. {agent.name} will walk
+                routinely move the number by more than the band above. {agent.name} will walk
                 the property and give you a figure she would be willing to list at.
               </p>
               <div className="mt-5 flex flex-wrap gap-3">
@@ -452,7 +477,12 @@ function ReportContent() {
                   {agent.phone}
                 </a>
               </div>
-              <p className="mt-4 text-sm text-ink-faint">{agent.license}</p>
+              {/* Brokerage with the licence, not only in the footer — this is
+                  agent-branded advertising and VA/MD/DC all require the
+                  brokerage's name on it. */}
+              <p className="mt-4 text-sm text-ink-faint">
+                {agent.brokerage} · {agent.license}
+              </p>
             </div>
           </div>
         </section>
