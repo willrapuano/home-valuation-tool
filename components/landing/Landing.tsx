@@ -5,7 +5,7 @@ import type { MarketPulse } from "@/lib/market-pulse";
 import { agent, agentFirstName } from "@/lib/agent";
 // One source for the backtest figures, shared with the results screen and the
 // report so the three can never quote different numbers at each other.
-import { ACCURACY, JURISDICTION_ERROR_PCT, jurisdictionLabel } from "@/lib/accuracy";
+import { ACCURACY, JURISDICTION_ACCURACY, jurisdictionLabel } from "@/lib/accuracy";
 
 /**
  * The landing page.
@@ -135,14 +135,12 @@ function MarketPanel({ pulse }: { pulse: MarketPulse }) {
             {pulse.sales.toLocaleString()}
           </dd>
           {/*
-            Only Fairfax publishes a sale-validity flag we can filter on in SQL.
-            DC's parcel layer carries none, so its count includes family
-            transfers — the wording has to follow the data rather than the other
-            way round.
+            The label follows the filters that actually ran — see scopeLabel in
+            lib/markets.ts. Only Fairfax can claim arm's-length; only DC and
+            Maryland can claim residential. Fairfax's sales layer carries no
+            land-use field, so its figure is "property sales", not "home sales".
           */}
-          <dt className="text-sm text-ink-muted mt-1">
-            {pulse.armsLength ? "Arm’s-length home sales recorded" : "Home sales recorded"}
-          </dt>
+          <dt className="text-sm text-ink-muted mt-1">{pulse.scope}</dt>
         </div>
         {/* Omitted rather than faked when the median query timed out — see
             lib/market-pulse.ts. The counts still stand on their own. */}
@@ -305,10 +303,24 @@ function Accuracy() {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(JURISDICTION_ERROR_PCT).map(([key, pct]) => (
+                {/*
+                  A jurisdiction whose measurement does not describe production
+                  shows no percentage here either. Maryland's backtest draws
+                  subjects from a pool as lagged as its comps, so the number it
+                  produces is not the one a homeowner receives — printing it in
+                  a table headed "measured" would be the same false claim the
+                  results screen now refuses to make.
+                */}
+                {Object.entries(JURISDICTION_ACCURACY).map(([key, figure]) => (
                   <tr key={key} className="border-b border-rule last:border-0">
                     <td className="px-5 py-3.5 text-ink">{jurisdictionLabel(key)}</td>
-                    <td className="px-5 py-3.5 text-right text-ink tnum">{pct}%</td>
+                    <td className="px-5 py-3.5 text-right tnum">
+                      {figure.displayable ? (
+                        <span className="text-ink">{figure.pct}%</span>
+                      ) : (
+                        <span className="text-ink-faint">being re-measured</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

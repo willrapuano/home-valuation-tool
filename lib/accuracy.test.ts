@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   accuracyLine,
+  displayableAccuracy,
   errorPctFor,
   formatErrorBand,
   formatEstimate,
+  newestCompDate,
+  recencyLine,
   roundToSigFigs,
   ACCURACY,
+  JURISDICTION_ACCURACY,
 } from "./accuracy";
 
 describe("roundToSigFigs", () => {
@@ -83,25 +87,94 @@ describe("formatErrorBand", () => {
 });
 
 describe("accuracyLine", () => {
-  it("names the jurisdiction when it has its own measured figure", () => {
+  it("names the jurisdiction where the measurement describes production", () => {
     expect(accuracyLine(1_951_882, "dc")).toBe(
       "give or take $92,000 — half of estimates in Washington, DC land within 4.7% of the sale price"
     );
   });
 
   /**
-   * Regression: interpolating the fallback label produced "half of public
-   * records estimates land within 6.1%…", which is not a sentence.
+   * THE RULE. Maryland's backtest draws subjects from a pool as lagged as its
+   * comps, so the extrapolation cancels and 6.6% is not what a homeowner
+   * receives — lag-cost.ts puts production nearer 9.5%. Rendering 6.6% under a
+   * Maryland estimate would print a figure we have measured to be wrong.
    */
-  it("omits the jurisdiction rather than interpolating the fallback label", () => {
-    const line = accuracyLine(1_951_882);
-    expect(line).toBe(
-      "give or take $120,000 — half of estimates land within 6.1% of the sale price"
-    );
-    expect(line).not.toContain("public records");
+  it("refuses to print a figure that does not describe production", () => {
+    expect(accuracyLine(1_951_882, "maryland")).toBeNull();
+    expect(JURISDICTION_ACCURACY.maryland.displayable).toBe(false);
   });
 
-  it("says nothing about a jurisdiction it has not measured", () => {
-    expect(accuracyLine(1_000_000, "arlington")).not.toContain("arlington");
+  it("prints nothing at all rather than a pooled fallback", () => {
+    expect(accuracyLine(1_951_882)).toBeNull();
+    expect(accuracyLine(1_000_000, "arlington")).toBeNull();
+    expect(accuracyLine(1_000_000, "postgres")).toBeNull();
+  });
+
+  /**
+   * Every Maryland county in lib/markets.ts is served by the one Maryland
+   * provider and reports `maryland`, so adding counties there cannot mint
+   * per-county accuracy claims that were never measured. This asserts the
+   * cross-product stays empty.
+   */
+  it("has no per-county entries the registry could have created", () => {
+    for (const key of ["montgomery", "prince-georges", "howard", "frederick", "anne-arundel"]) {
+      expect(JURISDICTION_ACCURACY[key]).toBeUndefined();
+      expect(accuracyLine(1_000_000, key)).toBeNull();
+    }
+  });
+
+  it("records why every undisplayable figure is withheld", () => {
+    for (const [key, figure] of Object.entries(JURISDICTION_ACCURACY)) {
+      if (!figure.displayable) expect(figure.basis.length).toBeGreaterThan(20);
+      expect(key).toBe(key.toLowerCase());
+    }
+  });
+});
+
+describe("displayableAccuracy", () => {
+  it("returns the figure only when it is safe to print", () => {
+    expect(displayableAccuracy("dc")?.pct).toBe(4.7);
+    expect(displayableAccuracy("fairfax")?.pct).toBe(7.5);
+    expect(displayableAccuracy("maryland")).toBeNull();
+    expect(displayableAccuracy(null)).toBeNull();
+  });
+});
+
+describe("recencyLine", () => {
+  it("states the date the evidence runs to", () => {
+    expect(recencyLine("2026-04-30")).toContain("through April 30, 2026");
+  });
+
+  /** The whole point for Maryland: make the lag legible, not just the date. */
+  it("names the lag when the feed is months behind", () => {
+    expect(recencyLine("2026-04-30")).toContain("months behind");
+  });
+
+  it("says nothing about lag for a current feed", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    expect(recencyLine(today)).not.toContain("months behind");
+  });
+
+  it("returns null rather than a broken sentence", () => {
+    expect(recencyLine(null)).toBeNull();
+    expect(recencyLine("")).toBeNull();
+    expect(recencyLine("not-a-date")).toBeNull();
+  });
+});
+
+describe("newestCompDate", () => {
+  it("takes the most recent sale, not the first row", () => {
+    expect(
+      newestCompDate([
+        { soldDate: "2026-01-15" },
+        { soldDate: "2026-04-30" },
+        { soldDate: "2026-03-02" },
+      ])
+    ).toBe("2026-04-30");
+  });
+
+  it("handles an empty or missing comp set", () => {
+    expect(newestCompDate([])).toBeNull();
+    expect(newestCompDate(undefined)).toBeNull();
   });
 });

@@ -11,9 +11,10 @@ import {
 import { agent, agentFirstName } from "@/lib/agent";
 import {
   accuracyLine,
-  errorPctFor,
-  formatErrorBand,
+  displayableAccuracy,
   formatEstimate,
+  newestCompDate,
+  recencyLine,
 } from "@/lib/accuracy";
 
 // The payload shape is defined once, in lib/report-payload.ts, and shared with
@@ -297,6 +298,9 @@ function ReportContent() {
   // Absent on links generated before the payload carried it, in which case the
   // error band falls back to the pooled figure rather than guessing a county.
   const jurisdiction = valuation.sourceJurisdiction;
+  const accuracyBand = accuracyLine(valuation.estimate, jurisdiction);
+  const recency = recencyLine(newestCompDate(valuation.comps));
+  const measured = displayableAccuracy(jurisdiction);
 
   /*
    * NO STATIC RENT FALLBACK.
@@ -345,9 +349,12 @@ function ReportContent() {
         <p className="mt-3 font-serif text-5xl md:text-6xl text-ink tnum leading-none">
           {formatEstimate(valuation.estimate)}
         </p>
-        <p className="mt-2 text-[15px] text-ink-muted tnum">
-          {accuracyLine(valuation.estimate, jurisdiction)}
-        </p>
+        {/* Band, or recency — never a hedge. See lib/accuracy.ts. */}
+        {accuracyBand ? (
+          <p className="mt-2 text-[15px] text-ink-muted tnum">{accuracyBand}</p>
+        ) : recency ? (
+          <p className="mt-2 text-[15px] text-ink-muted">{recency}</p>
+        ) : null}
 
         <p className="mt-5 text-lg text-ink">{streetLine}</p>
         <p className="text-ink-muted">
@@ -412,11 +419,14 @@ function ReportContent() {
                 label="Spread of the sales"
                 value={`${formatEstimate(valuation.low)} – ${formatEstimate(valuation.high)}`}
               />
-              <Row
-                label="Typical error here"
-                value={`± ${formatErrorBand(valuation.estimate, jurisdiction)}`}
-                note={`${errorPctFor(jurisdiction)}%, measured on held-out sales`}
-              />
+              {/* Only where the measurement describes production. */}
+              {measured ? (
+                <Row
+                  label="Typical error here"
+                  value={`± ${formatEstimate((valuation.estimate * measured.pct) / 100).replace(/^\$/, "$")}`}
+                  note={`${measured.pct}%, measured on held-out sales`}
+                />
+              ) : null}
               {pricePerSqft ? (
                 <Row label="Price per sqft" value={`$${pricePerSqft.toLocaleString()}`} />
               ) : null}

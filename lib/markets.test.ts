@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MARKETS, resolveMarket } from "./markets";
+import { MARKETS, resolveMarket, scopeLabel } from "./markets";
 import { parseLayerDate } from "./market-pulse";
 
 describe("resolveMarket", () => {
@@ -42,6 +42,35 @@ describe("market definitions", () => {
 
     expect(MARKETS.dc.armsLength).toBe(false);
     expect(MARKETS.montgomery.armsLength).toBe(false);
+  });
+
+  /**
+   * Measured on DC, 24 April – 23 July 2026: median $920,000 unfiltered against
+   * $870,000 restricted to dwellings. The $50,000 gap was hotels, offices,
+   * warehouses, parking lots and vacant land inside a "median sale price".
+   */
+  it("restricts to dwellings wherever the layer allows it", () => {
+    expect(MARKETS.dc.residentialOnly).toBe(true);
+    expect(MARKETS.dc.filters.some(f => f.includes("PROPTYPE"))).toBe(true);
+
+    expect(MARKETS.montgomery.residentialOnly).toBe(true);
+    expect(MARKETS.montgomery.filters.some(f => f.startsWith("LU IN"))).toBe(true);
+
+    // Fairfax genuinely cannot: land use lives on a different layer.
+    expect(MARKETS.fairfax.residentialOnly).toBe(false);
+  });
+
+  /** The label must never claim a filter that did not run. */
+  it("derives the panel label from the filters that actually ran", () => {
+    expect(scopeLabel(MARKETS.fairfax)).toBe("Arm’s-length property sales recorded");
+    expect(scopeLabel(MARKETS.dc)).toBe("Home sales recorded");
+    expect(scopeLabel(MARKETS.montgomery)).toBe("Home sales recorded");
+
+    for (const m of Object.values(MARKETS)) {
+      const label = scopeLabel(m);
+      if (!m.armsLength) expect(label).not.toContain("Arm");
+      if (!m.residentialOnly) expect(label).not.toContain("Home sales");
+    }
   });
 
   it("scopes every Maryland county to its own JURSCODE", () => {

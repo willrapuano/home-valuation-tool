@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AddressData, LeadData, ValuationData } from "../HomeValuationFlow";
 import { agent, agentFirstName } from "@/lib/agent";
+import { newestCompDate, recencyLine } from "@/lib/accuracy";
 
 interface Props {
   address: AddressData;
@@ -68,6 +69,17 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
   };
 
   const TEL = `tel:${agent.phone.replace(/[^\d+]/g, "")}`;
+
+  /*
+   * HOW OLD THE EVIDENCE IS, STATED.
+   *
+   * This screen is the mailed-CMA path, so these comps are what an agent
+   * approves a letter from. Maryland's state feed publishes about a quarter
+   * behind — a letter posted in July built from April sales is not wrong, but
+   * whoever signs it needs to know that before it goes out, and so does the
+   * homeowner who receives it.
+   */
+  const recency = recencyLine(newestCompDate(comps));
   const streetLine = `${address.streetNumber} ${address.streetName}`.trim() || address.full;
 
   const COVERS = [
@@ -192,6 +204,7 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
             will be adjusted for how it differs from your home — size, condition, lot and
             timing.
           </p>
+          {recency && <p className="mt-2 text-[15px] text-ink-muted max-w-2xl">{recency}</p>}
 
           {/* "Sold" folds into the address subline below `sm` rather than
               making the table scroll sideways off a phone screen. */}

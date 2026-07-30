@@ -251,8 +251,76 @@ significant digits on a number whose measured median error is 6.1%, roughly
 contradicted the accuracy section on the landing page.
 
 The headline is now three significant figures (`$1.95M`) with the measured band
-for that jurisdiction underneath it (`give or take $92,000 — half of Washington,
-DC estimates land within 4.7% of the sale price`).
+for that jurisdiction underneath it (`give or take $92,000 — half of estimates
+in Washington, DC land within 4.7% of the sale price`).
+
+#### No percentage without a production-path measurement
+
+`accuracyLine()` returns **null** for any jurisdiction whose measurement does
+not describe what a visitor actually gets, and the UI shows the data's recency
+instead. There is no hedged middle state: a figure is either safe to print or it
+is withheld.
+
+**Maryland is currently withheld.** Every backtest here draws its subjects from
+the same lagged pool as its comps, so subject and comps sit behind Maryland's
+publishing lag together and the forward extrapolation cancels. Production does
+not get that. `scripts/lag-cost.ts` measured the difference by cutting comps off
+90 days early:
+
+| cutoff | all | maryland | dc | fairfax | valued |
+|---|---|---|---|---|---|
+| same week | 5.3% | 5.7% | 5.9% | 5.1% | 93% |
+| 90 days | 7.0% | **9.5%** | 7.0% | 5.3% | 73% |
+
+Maryland lives at the 90-day row in production: nearer 9.5% than the 6.6% the
+standard backtest reports, and 20 points less coverage. DC and Fairfax publish
+within ~10 days, so their backtest conditions match production and their figures
+stand. Maryland's percentage returns when `production-path-backtest.ts` is re-run
+against a lag-simulated comp set.
+
+`JURISDICTION_ACCURACY` is keyed by **provider slug**, not market key. Every
+Maryland county is served by the one Maryland provider and reports `maryland`,
+so adding counties to `lib/markets.ts` cannot mint per-county accuracy claims
+that were never measured. A test asserts that cross-product stays empty.
+
+#### The Maryland lag is structural, not an ingest problem
+
+Checked and documented in `scripts/lag-cost.ts`: both iMAP layers carry the
+identical lag, as does every service in iMAP's PlanningCadastre catalogue; MDP's
+own `mdpgis.mdp.state.md.us` hosts no sales; Montgomery County open data
+publishes tax rolls only; and SDAT Real Property Search returns 403 to automated
+requests. There is no free fresher Maryland source. Fresh Maryland sales are
+therefore another thing a TitlePro247 / MDLandRec subscription would unlock, on
+top of Bethesda's deed types.
+
+The engine already time-adjusts each comp forward by its age
+(`adjustComp`, `annualAppreciation`), so the point estimate is not naively
+comparing July to April — but the appreciation rate is fitted on sales that also
+stop in April, and the lag-cost table above is what that extrapolation costs in
+practice. An HPI-indexed market-conditions adjustment would replace the locally
+fitted rate with a published index; the measured cost is dominated by comp
+staleness itself rather than by the rate being wrong, so that is an improvement
+rather than the fix.
+
+Every screen that shows comps — results, shareable report, and the mailed-CMA
+screen an agent approves letters from — now prints *"Based on sales recorded
+through 30 April 2026 — this jurisdiction publishes sales about 3 months behind,
+so the market has moved since."* The date is derived from the newest comp
+actually shown, not from a constant.
+
+#### Hero medians are filtered to dwellings where the layer allows it
+
+`scripts/market-benchmark.ts` prints each market's quartiles filtered and
+unfiltered. Measured on DC, 24 April – 23 July 2026: 1,459 "sales" with a median
+of **$920,000** unfiltered, against 1,115 sales and **$870,000** restricted to
+single-family dwellings. The $50,000 difference was hotels, offices, warehouses,
+parking lots, religious buildings, garages and vacant land inside a figure
+labelled "median sale price".
+
+Fairfax cannot do this — its sales layer carries no land-use field — so its panel
+honestly says "property sales" rather than "home sales". `scopeLabel()` derives
+that wording from the filters that actually ran, so a filter that gets removed
+cannot leave a claim behind.
 
 `low`/`high` from the engine are **not** a confidence interval and are no longer
 labelled as one. They come out of `reconcile()` as the weighted dispersion of

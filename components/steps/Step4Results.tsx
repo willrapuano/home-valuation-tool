@@ -4,7 +4,13 @@ import { Fragment, useState } from "react";
 import { AddressData, LeadData, ValuationData } from "../HomeValuationFlow";
 import PreparingValuation from "./PreparingValuation";
 import { agent, agentFirstName } from "@/lib/agent";
-import { accuracyLine, formatEstimate, jurisdictionLabel } from "@/lib/accuracy";
+import {
+  accuracyLine,
+  formatEstimate,
+  jurisdictionLabel,
+  newestCompDate,
+  recencyLine,
+} from "@/lib/accuracy";
 
 interface Props {
   address: AddressData;
@@ -295,6 +301,9 @@ function FullResults({
 
   const streetLine = `${address.streetNumber} ${address.streetName}`.trim() || address.full;
 
+  const accuracyBand = accuracyLine(valuation.estimate, valuation.sourceJurisdiction);
+  const recency = recencyLine(newestCompDate(valuation.comps));
+
   return (
     <div className="animate-fade-in w-full">
       {/* ── The number, and the address it belongs to ──────────────── */}
@@ -310,9 +319,18 @@ function FullResults({
         <p className="mt-3 font-serif text-5xl md:text-6xl text-ink tnum leading-none">
           {formatEstimate(valuation.estimate)}
         </p>
-        <p className="mt-2 text-[15px] text-ink-muted tnum">
-          {accuracyLine(valuation.estimate, valuation.sourceJurisdiction)}
-        </p>
+        {/*
+          One or the other, never a hedge. `accuracyLine` returns null for a
+          jurisdiction whose measurement does not reflect production — Maryland,
+          whose backtest pool is as lagged as its comps — and the recency line
+          takes its place: a fact about the evidence rather than an estimate of
+          an estimate. See lib/accuracy.ts.
+        */}
+        {accuracyBand ? (
+          <p className="mt-2 text-[15px] text-ink-muted tnum">{accuracyBand}</p>
+        ) : recency ? (
+          <p className="mt-2 text-[15px] text-ink-muted">{recency}</p>
+        ) : null}
 
         <p className="mt-5 text-lg text-ink">{streetLine}</p>
         <p className="text-ink-muted">

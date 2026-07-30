@@ -30,7 +30,7 @@
  * statistics.
  */
 
-import { MarketDefinition, resolveMarket } from "./markets";
+import { MarketDefinition, resolveMarket, scopeLabel } from "./markets";
 
 /**
  * ONE BUDGET FOR THE WHOLE OPERATION, not per request.
@@ -79,8 +79,15 @@ export interface MarketPulse {
    * copy says "through" rather than "as of".
    */
   through: string;
-  /** Whether non-arm's-length transfers were excluded. Drives the wording. */
-  armsLength: boolean;
+  /**
+   * What the count actually covers, e.g. "Arm's-length property sales recorded"
+   * or "Home sales recorded".
+   *
+   * Derived from the filters that were applied rather than written per market,
+   * so the panel cannot claim a filter it did not run. Only Fairfax can assert
+   * arm's-length; only DC and Maryland can assert residential.
+   */
+  scope: string;
 }
 
 function where(m: MarketDefinition, from: Date, to: Date): string {
@@ -250,7 +257,7 @@ export async function fetchMarketPulse(marketKey?: string | null): Promise<Marke
       salesOnFile,
       windowDays: WINDOW_DAYS,
       through: through.toISOString().slice(0, 10),
-      armsLength: market.armsLength,
+      scope: scopeLabel(market),
     };
   } catch (err) {
     console.warn(

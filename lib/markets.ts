@@ -41,12 +41,40 @@ export interface MarketDefinition {
   /**
    * Whether `filters` actually excludes non-arm's-length transfers.
    *
-   * Fairfax publishes SALEVAL_DESC and Maryland's feed is already filtered to
-   * considerations; DC's parcel layer carries no qualification flag at all —
-   * the flag lives on a separate CAMA layer the count cannot join to. So the DC
-   * copy must NOT claim "arm's-length", and this is what drives that wording.
+   * Fairfax publishes SALEVAL_DESC; DC's parcel layer carries no qualification
+   * flag at all — the flag lives on a separate CAMA layer the count cannot join
+   * to — and Maryland's feed publishes consideration without a validity code.
+   * So only Fairfax's copy may claim "arm's-length", and this is what drives
+   * that wording.
    */
   armsLength: boolean;
+  /**
+   * Whether `filters` restricts to residential dwellings.
+   *
+   * NOT cosmetic. Measured on DC, 24 April – 23 July 2026: unfiltered, the
+   * median of 1,459 "sales" was $920,000; restricted to single-family, the
+   * median of 1,115 was $870,000. The $50,000 difference is hotels, offices,
+   * warehouses, parking lots, religious buildings, garages and vacant land
+   * sitting inside a number labelled "median sale price" — and an agent knows
+   * their county's median by heart, so a wrong hero figure costs more than no
+   * panel at all.
+   *
+   * Fairfax cannot do this: its sales layer carries no land-use field (that
+   * lives on the assessed-values layer, which a count query cannot join to), so
+   * its figures are honestly labelled "property sales" rather than "home
+   * sales".
+   */
+  residentialOnly: boolean;
+}
+
+/**
+ * What the panel may call the thing it counted. Derived from the filters that
+ * were actually applied rather than written by hand per market, so a filter
+ * that gets removed cannot leave a claim behind.
+ */
+export function scopeLabel(m: MarketDefinition): string {
+  const kind = m.residentialOnly ? "home sales" : "property sales";
+  return m.armsLength ? `Arm’s-length ${kind} recorded` : `${kind[0].toUpperCase()}${kind.slice(1)} recorded`;
 }
 
 const esriDate = (d: Date) => `DATE '${d.toISOString().slice(0, 10)}'`;
@@ -62,8 +90,21 @@ function marylandCounty(label: string, jurscode: string): MarketDefinition {
     dateField: "TRADATE",
     dateLiteral: mdDate,
     minPrice: 50_000,
-    filters: [`JURSCODE = '${jurscode}'`],
+    filters: [
+      `JURSCODE = '${jurscode}'`,
+      // The same land-use codes the Maryland provider treats as dwellings.
+      // Measured on Montgomery: 2,822 sales unfiltered, 2,715 residential.
+      //
+      // THIS FILTER IS ALSO A LARGE SPEEDUP, which is the opposite of the
+      // parcel layer's behaviour (see the `LU IN` note in providers/maryland.ts,
+      // where adding it cost 10.9s against 1.0s). On the SALES layer the median
+      // query at offset 1,350 measured 72.1s unfiltered against 15.0s with
+      // `LU IN` — roughly five times faster. Removing it to "simplify" would
+      // both corrupt the median and put it back outside the request budget.
+      "LU IN ('R','U','TH','M')",
+    ],
     armsLength: false,
+    residentialOnly: true,
   };
 }
 
@@ -85,6 +126,9 @@ export const MARKETS: Record<string, MarketDefinition> = {
       "(NOPAR IS NULL OR NOPAR <= 1)",
     ],
     armsLength: true,
+    // ParcelPlusSales carries no land-use field; it lives on
+    // ParcelPlusAssessedValues, which a single count query cannot join to.
+    residentialOnly: false,
   },
 
   dc: {
@@ -95,8 +139,15 @@ export const MARKETS: Record<string, MarketDefinition> = {
     dateField: "SALEDATE",
     dateLiteral: esriDate,
     minPrice: 50_000,
-    filters: [],
+    filters: [
+      // Row, detached and semi-detached — the three forms `propertyTypeFromProptype`
+      // in the DC provider maps to a house. Condominiums are deliberately out:
+      // "median home price" and "median condo price" are different numbers and
+      // an agent quotes them separately.
+      "PROPTYPE LIKE 'Residential-Single Family%'",
+    ],
     armsLength: false,
+    residentialOnly: true,
   },
 
   montgomery: marylandCounty("Montgomery County", "MONT"),
