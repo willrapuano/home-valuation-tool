@@ -139,10 +139,14 @@ npx tsx scripts/ingest.ts fairfax
 npx tsx scripts/ingest.ts maryland
 
 # 3. VALIDATE BEFORE TRUSTING IT. These must match the live-source numbers
-#    (DC 4.5%, Fairfax 5.3%, Maryland 8.7%).
+#    (engine: DC 4.5%, Fairfax 5.3%, Maryland 8.7%).
 npx tsx scripts/dc-backtest.ts 40
 npx tsx scripts/backtest.ts 40
 npx tsx scripts/maryland-backtest.ts 50
+
+#    And the one that measures what a visitor actually receives, which the
+#    three above cannot see because they never call lookupSubject:
+npx tsx scripts/production-path-backtest.ts 18
 
 # 4. Set DATABASE_URL in Vercel, redeploy, then re-measure.
 npx tsx scripts/latency-probe.ts
