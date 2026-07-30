@@ -42,6 +42,15 @@ const REVERSE_GEOCODE_METRES = 250;
  * computed, so a slow locator must cost a label rather than the estimate.
  */
 const GEOCODE_TIMEOUT_MS = 3_000;
+/**
+ * Subject lookup: containment first, then ONE widened fallback. Bounded at two
+ * rungs for the same reason as DC and Maryland — each rung is a sequential
+ * round trip, and a four-rung ladder measured 12.1s in Frederick against the
+ * route's 20s budget. Fairfax was left on four when the others were bounded.
+ */
+const SUBJECT_SEARCH_LADDER = [0, 0.1];
+/** Enough that a widened rung ranks the true nearest parcel, not an arbitrary one. */
+const SUBJECT_SEARCH_RECORDS = 1000;
 
 // Kept well under the API route's own budget: the county service is
 // occasionally slow, and a long hang here burns the whole request.
@@ -176,6 +185,30 @@ export function ringCentroid(rings?: number[][][]): LatLng | null {
 
   const factor = 1 / (3 * twiceArea);
   return { lng: x * factor, lat: y * factor };
+}
+
+/**
+ * The candidate whose centroid is closest to the point.
+ *
+ * Squared degrees rather than haversine: within a tenth of a mile the ranking
+ * is identical and this avoids the trigonometry per candidate.
+ */
+function nearestByCentroid(
+  features: EsriFeature[],
+  to: LatLng
+): Record<string, unknown> | undefined {
+  let best: Record<string, unknown> | undefined;
+  let bestDistance = Infinity;
+  for (const f of features) {
+    const c = ringCentroid(f.geometry?.rings);
+    if (!c) continue;
+    const d = (c.lng - to.lng) ** 2 + (c.lat - to.lat) ** 2;
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = f.attributes;
+    }
+  }
+  return best;
 }
 
 function toDate(value: unknown): string | undefined {
@@ -402,22 +435,41 @@ export class FairfaxCountyProvider implements CompsProvider {
       .map(c => `'${c}'`)
       .join(",");
 
-    for (const distanceMiles of [0, 0.02, 0.05, 0.1]) {
+    for (const distanceMiles of SUBJECT_SEARCH_LADDER) {
+      const containment = distanceMiles === 0;
       const features = await esriQuery(ASSESSED_LAYER, {
         geometry,
         geometryType: "esriGeometryPoint",
         spatialRel: "esriSpatialRelIntersects",
-        ...(distanceMiles > 0
-          ? { distance: String(distanceMiles), units: "esriSRUnit_StatuteMile" }
-          : {}),
+        ...(containment
+          ? {}
+          : { distance: String(distanceMiles), units: "esriSRUnit_StatuteMile" }),
         inSR: "4326",
         outSR: "4326",
         where: `LUC IN (${residentialCodes})`,
         outFields: "PIN,LUC,APRTOT,TAXYR",
-        returnGeometry: "false",
-        resultRecordCount: "1",
+        // Geometry only when widening, because only then is there a choice to
+        // make between candidates — see below.
+        returnGeometry: containment ? "false" : "true",
+        resultRecordCount: containment ? "1" : String(SUBJECT_SEARCH_RECORDS),
       });
-      if (features[0]) return this.toSubject(features[0].attributes, location, distanceMiles === 0);
+
+      if (containment) {
+        if (features[0]) return this.toSubject(features[0].attributes, location, true);
+        continue;
+      }
+
+      // WIDENED: pick the NEAREST, not whichever the service returns first.
+      //
+      // This used to ask for `resultRecordCount: 1` with no ordering, which
+      // takes an ARBITRARY parcel within a tenth of a mile. That is the same
+      // defect DC had — there, the nearest of an arbitrary 40 — and worse,
+      // because it chose from one. It only bites when containment misses, but
+      // Fairfax publishes no characteristics, so its subject is nothing but an
+      // assessment: the wrong parcel is a wrong adjustment basis outright,
+      // with nothing else to dilute it. Measured at 14% of Fairfax lookups.
+      const best = nearestByCentroid(features, location);
+      if (best) return this.toSubject(best, location, false);
     }
     return null;
   }

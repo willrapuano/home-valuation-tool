@@ -41,6 +41,7 @@ vi.mock("./esri", () => ({
 
 const { DcProvider } = await import("./dc");
 const { MarylandProvider } = await import("./maryland");
+const { FairfaxCountyProvider } = await import("./fairfax");
 
 afterEach(() => {
   calls.length = 0;
@@ -51,6 +52,13 @@ const AT = { lat: 38.887, lng: -76.993 };
 describe.each([
   ["DC", () => new DcProvider()],
   ["Maryland", () => new MarylandProvider()],
+  // Fairfax kept a four-rung ladder and `resultRecordCount: 1` after the other
+  // two were fixed — so its widened rung took an ARBITRARY parcel, not the
+  // nearest. Measured live: in McLean that picked a parcel 349 feet further
+  // away assessed at $7,626,500 against the correct $2,496,110. Fairfax
+  // publishes no characteristics, so the subject is nothing but that
+  // assessment and the estimate was simply 3x wrong.
+  ["Fairfax", () => new FairfaxCountyProvider()],
 ])("%s subject lookup", (_name, make) => {
   it("asks for the containing parcel before widening", async () => {
     await make().lookupSubject(AT);
