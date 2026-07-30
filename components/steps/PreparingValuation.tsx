@@ -27,6 +27,13 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // Two reasons to be on this screen, and they promise different things.
+  // "mailed_mode" is the deliberate product: a report is being prepared and
+  // posted. Everything else is a genuine failure to value the property, where
+  // the honest commitment is a CMA rather than a printed report.
+  const mailed = valuation.degradedCode === "mailed_mode";
+  const comps = valuation.comps ?? [];
+
   const streetViewUrl =
     valuation.streetViewUrl ?? `/api/streetview?location=${encodeURIComponent(address.full)}`;
   const [imgError, setImgError] = useState(false);
@@ -103,7 +110,7 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
             In progress
           </div>
           <h2 className="text-2xl md:text-3xl font-bold text-white leading-tight mb-2">
-            Your valuation is being prepared
+            {mailed ? "Your valuation report is on its way" : "Your valuation is being prepared"}
           </h2>
           <p className="text-white font-semibold text-sm">
             {address.streetNumber} {address.streetName}
@@ -117,9 +124,19 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
       {/* What Candee is doing */}
       <div className="glass rounded-2xl p-5 md:p-6 gold-border">
         <p className="text-white/70 text-sm leading-relaxed mb-5">
-          Candee is personally reviewing recent sales near your home. You&apos;ll have a full
-          comparative market analysis within 24 hours — prepared by hand, not generated
-          automatically.
+          {mailed ? (
+            <>
+              Candee is preparing a full valuation report for {address.streetNumber}{" "}
+              {address.streetName} and will mail it to you for review — prepared by hand
+              from the sales below, not generated automatically.
+            </>
+          ) : (
+            <>
+              Candee is personally reviewing recent sales near your home. You&apos;ll have a
+              full comparative market analysis within 24 hours — prepared by hand, not
+              generated automatically.
+            </>
+          )}
         </p>
 
         <div className="grid sm:grid-cols-2 gap-4">
@@ -147,7 +164,9 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
             <div className="flex-1 bg-gold/10 border border-gold/30 rounded-xl px-4 py-3">
               <p className="text-gold text-sm font-semibold">✓ Request confirmed</p>
               <p className="text-white/60 text-xs mt-1">
-                Candee will be in touch at {lead.email} within 24 hours.
+                {mailed
+                  ? `Your report is being prepared and will be mailed to ${address.streetNumber} ${address.streetName}.`
+                  : `Candee will be in touch at ${lead.email} within 24 hours.`}
               </p>
             </div>
           ) : (
@@ -167,6 +186,55 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
           </a>
         </div>
       </div>
+
+      {/* The sales the posted report is built from.
+
+          Shown WITHOUT a headline figure on purpose. These are public record
+          and verifiable, so they make no accuracy claim of their own, and they
+          are what an agent actually opens with — "here is what sold near you".
+          The number follows on paper, reviewed by a person. */}
+      {comps.length > 0 && (
+        <div className="glass rounded-2xl p-5 md:p-6 border border-white/10">
+          <p className="text-gold font-bold text-xs uppercase tracking-wider mb-1">
+            Recent sales near {address.streetName || "your home"}
+          </p>
+          <p className="text-white/40 text-xs mb-4">
+            Every one is public record. These are what the report is built from.
+          </p>
+
+          <ul className="space-y-2">
+            {comps.slice(0, 5).map(c => (
+              <li
+                key={`${c.address}-${c.soldDate}`}
+                className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-white/90 text-sm font-medium">{c.address}</span>
+                  <span className="text-white font-semibold text-sm whitespace-nowrap">
+                    {new Intl.NumberFormat("en-US", {
+                      style: "currency",
+                      currency: "USD",
+                      maximumFractionDigits: 0,
+                    }).format(c.soldPrice)}
+                  </span>
+                </div>
+                <p className="text-white/40 text-xs mt-1">
+                  {c.distanceMiles} mi away
+                  {" · "}
+                  {c.monthsAgo === 0 ? "sold this month" : `sold ${c.monthsAgo}mo ago`}
+                  {c.sqft ? ` · ${c.sqft.toLocaleString()} sqft` : ""}
+                  {c.beds ? ` · ${c.beds} bd` : ""}
+                </p>
+              </li>
+            ))}
+          </ul>
+
+          <p className="text-white/30 text-xs mt-3">
+            Your report adjusts each of these for how it differs from your home — size,
+            condition, lot and timing.
+          </p>
+        </div>
+      )}
 
       {/* Agent card */}
       <div className="rounded-2xl p-6 border-2 border-gold/40 bg-gradient-to-br from-gold/10 to-navy">

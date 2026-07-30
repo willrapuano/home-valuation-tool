@@ -1,5 +1,13 @@
 "use client";
 
+/**
+ * Mailed mode is decided on the server, but this screen runs BEFORE the
+ * valuation call, so it has nothing to read the decision from. The public
+ * mirror exists only for copy — the server is still what withholds the
+ * estimate, so a mismatched build changes wording and never leaks a number.
+ */
+const MAILED_MODE = process.env.NEXT_PUBLIC_VALUATION_MODE?.trim().toLowerCase() === "mailed";
+
 import { useState } from "react";
 import { AddressData } from "../HomeValuationFlow";
 
@@ -88,8 +96,10 @@ export default function Step3LeadGate({ address, valuation, onSubmit }: Step3Lea
           </p>
           <p className="text-white/55 text-xs leading-relaxed">
             A comparative market analysis built from recent sales near your home — including the
-            condition, upgrades and lot factors an automated tool can&apos;t see. Delivered within
-            24 hours, at no cost.
+            condition, upgrades and lot factors an automated tool can&apos;t see.{" "}
+            {MAILED_MODE
+              ? "Prepared by hand and mailed to you, at no cost."
+              : "Delivered within 24 hours, at no cost."}
           </p>
         </div>
       )}
