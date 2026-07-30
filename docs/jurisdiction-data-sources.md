@@ -325,42 +325,67 @@ So the realistic outcome is two counties served worse than the three already
 covered, plus a permanent recurring chore, in exchange for coverage that a
 commercial feed supplies without any of it.
 
-### What actually closes the gap
+### What actually closes the gap: TitlePro247
 
-**Commercial property data** — TitlePro247, which is already licensed, and
-whose client already exists in the sibling `velocity-connectors` repo
-(`lib/titlepro247/`, shipped 2026-07-23). Session auth, order submission,
-XLSX export and parse are all working there.
-
-Its export carries everything the engine needs:
+Already licensed, already implemented in the sibling `velocity-connectors`
+repo (`lib/titlepro247/`, shipped 2026-07-23), and **confirmed by the licence
+holder as permitted for consumer display**. Its export carries everything the
+engine needs:
 
 ```
 lastSaleAmount, lastSaleDate, assessedValue, beds, baths, sqft,
 yearBuilt, lotSize, propertyType, siteAddress*
 ```
 
-**It is a batch source, not a query API.** A TitlePro247 "search" is a billable,
-asynchronous farm-list *order* — submit, poll, download, parse. It cannot go in
-a request path at any price, so it is ingested into `sales` and served from
-Postgres. See `lib/comps/providers/titlepro247.ts` and
-`scripts/ingest-titlepro.ts`. This is why the datastore is a **prerequisite**
-for Northern Virginia coverage rather than a latency optimisation.
+**It is a batch source, not a query API.** A TitlePro247 "search" is a
+billable, asynchronous farm-list *order* — submit, poll, download XLSX, parse.
+It cannot sit in a request path at any latency. So the export is ingested into
+`sales` and served from Postgres, which is why the datastore is a
+**prerequisite** for Northern Virginia coverage rather than a latency
+optimisation. See `lib/comps/providers/titlepro247.ts` and
+`scripts/ingest-titlepro.ts`.
 
-Two things the export does *not* carry, both handled at ingest:
+#### The budget is the constraint, and it is a one-time one
+
+Pulls are capped at **10,000 per month**. `scripts/titlepro-budget.ts` sizes an
+order before any of it is spent, using a turnover rate measured on Fairfax —
+27,135 sales against 369,079 parcels, **7.35% per year**:
+
+| county | parcels | est. sales/yr | 12-month backfill | % of cap |
+|---|---|---|---|---|
+| Arlington | 38,683 | 2,844 | 2,844 | 28% |
+| Loudoun | 132,557 | 9,746 | 9,746 | 97% |
+| **total** | 171,240 | 12,590 | 12,590 | **126%** |
+
+So the backfill needs two months, or a shortened history. **Steady state is
+~1,050 pulls per month — 10% of the cap** — because only new sales are pulled
+once the history is loaded.
+
+**Use `maxOwnershipYears`.** A farm search returns current owners in a radius,
+so tiling a county without it pulls all 171,240 parcels to find the ~12,600
+that sold: seventeen months of budget for one year of comps. Ownership tenure
+is time since the last sale, so `maxOwnershipYears: 1` returns the comp set and
+nothing else.
+
+Confirm with `getCount()` in velocity-connectors before ordering — it asks
+TitlePro247 for the real number without spending any budget. The table above is
+an estimate from a neighbouring county.
+
+#### Two gaps in the export, both handled at ingest
 
 - **No coordinates.** Only `distanceFeet` from the search centre, which fixes a
-  radius and not a position. Addresses are geocoded through the Census Bureau's
-  free batch service — 92% matched on real Arlington and Loudoun addresses.
-- **No parcel number.** The normalised site address stands in as the natural
-  key, which keeps re-ingest idempotent.
+  radius and not a position. Addresses go through the Census Bureau's free batch
+  geocoder — 92% matched on real Arlington and Loudoun addresses, and the
+  misses are reported rather than silently dropped.
+- **No parcel number.** The normalised site address is the natural key, which
+  keeps re-ingest idempotent.
 
-⚠️ **Licensing is unresolved and gates all of this.** Everything published today
-is county public record with no redistribution restriction. TitlePro247 is
-licensed to a real-estate professional, and it is not established that its data
-may be shown to anonymous consumers on a public valuation page. Ingest is
-deliberately separate from serving: rows can land in the table without
-`/api/avm` ever reading them, so the question can be settled before anything
-reaches a homeowner.
+#### It also buys a deed-type flag
+
+Worth noting beyond coverage: DC is the only jurisdiction that can be measured
+honestly today, because it is the only one publishing an arm's-length flag —
+see the holdout-quality section above. TitlePro247 carries deed type, which
+would let Maryland and Fairfax be measured properly too.
 
 **Scraping the county property-search applications** remains the fallback if
 that answer is no. Brittle, and it puts a third party's uptime in the request

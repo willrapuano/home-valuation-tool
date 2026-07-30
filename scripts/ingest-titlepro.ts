@@ -7,6 +7,12 @@
  *
  * Accepts .xlsx, .csv or .json.
  *
+ * THE MONTHLY CAP IS 10,000 PULLS. A farm search returns CURRENT OWNERS in a
+ * radius, so tiling a county naively spends the whole budget on parcels that
+ * never sold — 132,557 for Loudoun alone. Use `maxOwnershipYears` to return
+ * only recently-transacted properties; run `scripts/titlepro-budget.ts` to
+ * size an order before placing it.
+ *
  * WHY A FILE AND NOT AN API CALL
  *
  * TitlePro247 searches are billable, asynchronous farm-list ORDERS, not
@@ -15,12 +21,15 @@
  * and neither should be duplicated into a public-facing valuation app. This
  * takes the resulting export.
  *
- * WHAT IT DOES NOT DO: wire TitlePro247 into `/api/avm`. Rows land in the
- * table and are served only if a PostgresProvider covering that jurisdiction
- * is added to COVERAGE, which is deliberately a separate, deliberate act —
- * whether this data may be shown to anonymous consumers is a licensing
- * question that has not been answered. Ingesting is reversible; publishing
- * someone else's licensed data is not.
+ * SERVING IS SEPARATE FROM INGESTING, deliberately. Rows land in the table and
+ * are read only if their jurisdiction appears in `DEFAULT_JURISDICTIONS` in
+ * lib/comps/providers/postgres.ts. "arlington" and "loudoun" are listed, so a
+ * completed ingest goes live; anything else you load — a scratch county, a
+ * half-validated pull — stays unserved until it is named there.
+ *
+ * That separation is what lets an ingest be checked before it reaches a
+ * homeowner. Use --dry-run first; a bad load is far easier to avoid than to
+ * notice afterwards.
  *
  * --dry-run does everything except write, and prints the same report. Run it
  * first on any new county: it is how you find out that the property-type
