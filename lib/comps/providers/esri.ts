@@ -1,3 +1,38 @@
+
+/**
+ * WIDE SPATIAL QUERIES ARE A KNOWN HAZARD — ON SOME SERVICES.
+ *
+ * A subject lookup asks "what is at this point", and the tempting shape is one
+ * query: a radius search returning every field the caller might want, across
+ * enough records that the nearest is genuinely the nearest. That shape cost
+ * Maryland its entire production coverage.
+ *
+ * Measured 2026-07-30, identical geometry, 1,000-record cap:
+ *
+ *   service                    minimal fields        full field set
+ *   MD iMAP MD_PropertyData    0.3–1.4s (n=6)        4.6 / 8.4 / 9.7 / 16.5 / 28.2s
+ *   DC DCGIS Property_and_Land 0.8s                  0.4 / 0.4 / 0.7s
+ *   Fairfax ParcelPlus*        n/a — already narrow (4 fields)
+ *
+ * iMAP's cost is nonlinear in field count AND wildly variable, so the same
+ * query straddles an 8s timeout. DCGIS is flat. THIS IS A PROPERTY OF THE
+ * SERVICE, NOT OF ARCGIS — do not two-phase DC "for consistency"; it would add
+ * a round trip to a query that is already fast.
+ *
+ * THE RULE, therefore, is not "always split" but:
+ *
+ *   1. Select the MINIMUM needed to CHOOSE among candidates — geometry, an id,
+ *      and whatever filters them (land use, property type).
+ *   2. Fetch the full attribute set by id, for the one that won.
+ *   3. Do this whenever the wide form is measured slower than half the
+ *      provider's timeout, or varies by more than about 2x across runs.
+ *
+ * And measure before assuming, in both directions. A timeout here returns null,
+ * which the route reads as "no subject" and the UI renders as "no data for this
+ * address" — indistinguishable from an out-of-area request. Nothing errors, so
+ * nothing is noticed.
+ */
+
 /**
  * Shared ArcGIS REST query, with hedging to control tail latency.
  *

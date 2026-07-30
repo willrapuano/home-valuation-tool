@@ -303,17 +303,31 @@ way Maryland actually works:
 npx tsx scripts/production-path-backtest.ts 25 90
 ```
 
-| run | jurisdiction | paired | record subj | live subj | published | **MdAPE shown** |
-|---|---|---|---|---|---|---|
-| A | dc | 37 | 5.1% | 4.5% | 90% | **4.5%** |
-| A | maryland | 44 | 8.6% | 10.3% | 67% | **11.7%** |
-| B | dc | 36 | 5.7% | 5.7% | 85% | **5.2%** |
-| B | maryland | 36 | 6.8% | 8.2% | 69% | **10.1%** |
-| B | fairfax | 49 | 6.7% | 6.7% | 96% | **6.6%** |
+| run | jurisdiction | paired | record subj | live subj | published | **MdAPE shown** | exact |
+|---|---|---|---|---|---|---|---|
+| A | dc | 37 | 5.1% | 4.5% | 90% | **4.5%** | 100% |
+| A | maryland | 44 | 8.6% | 10.3% | 67% | **11.7%** | 88% |
+| B | dc | 36 | 5.7% | 5.7% | 85% | **5.2%** | 100% |
+| B | maryland | 36 | 6.8% | 8.2% | 69% | **10.1%** | 88% |
+| B | fairfax | 49 | 6.7% | 6.7% | 96% | **6.6%** | 88% |
+| C | dc | 37 | 6.0% | 6.0% | 83% | **5.0%** | 100% |
+| C | maryland | 47 | 8.0% | 9.1% | 66% | **11.2%** | 100% |
+| C | fairfax | 49 | 6.7% | 6.7% | 96% | **6.6%** | 88% |
 
-**Maryland is 10–12%, not 6.6%.** Two runs at n≈40 gave 11.7% and 10.1%; the
-higher ships, because they straddle about ±1pp of sampling noise and every
-figure here is a floor (see below). It carries the condition it was measured
+Run C governs: first with Maryland's subject lookup fixed, first with Rockville
+contributing, largest Maryland sample. Maryland's `exact` went 88% → **100%** —
+the two-phase lookup does not just succeed more often, it resolves the right
+parcel every time.
+
+**A prediction that was wrong, kept because it was wrong.** Fixing the lookup was
+expected to raise Maryland's publish rate. It did not — 67%, 69%, 66% across the
+three runs. Coverage is limited by how many usable comps survive the lag, not by
+lookups failing. The fix bought correctness, not reach. Only fresher data buys
+reach.
+
+**Maryland is 10–12%, not 6.6%.** Three runs at n=36–47 gave 11.7%, 10.1% and
+11.2%; the highest ships, because they span about 1.6pp of sampling noise and
+every figure here is a floor (see below). It carries the condition it was measured
 under: *"half of estimates in Maryland land within 11.7% of the sale price,
 measured under Maryland's ~3-month reporting lag."* Without that qualifier the
 number reads as the engine being bad at Maryland houses rather than working from

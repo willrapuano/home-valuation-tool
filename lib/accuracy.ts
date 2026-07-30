@@ -39,15 +39,31 @@
  * measurement that governs the display is the PRODUCTION path run under the
  * lag — `production-path-backtest.ts 25 90`:
  *
- *     run  jurisdiction   paired   record subj   live subj   published   shown
- *      A   dc                 37          5.1%        4.5%         90%     4.5%
- *      A   maryland           44          8.6%       10.3%         67%    11.7%
- *      B   dc                 36          5.7%        5.7%         85%     5.2%
- *      B   maryland           36          6.8%        8.2%         69%    10.1%
- *      B   fairfax            49          6.7%        6.7%         96%     6.6%
+ *     run  jurisdiction   paired   record subj   live subj   published   shown   exact
+ *      A   dc                 37          5.1%        4.5%         90%     4.5%    100%
+ *      A   maryland           44          8.6%       10.3%         67%    11.7%     88%
+ *      B   dc                 36          5.7%        5.7%         85%     5.2%    100%
+ *      B   maryland           36          6.8%        8.2%         69%    10.1%     88%
+ *      B   fairfax            49          6.7%        6.7%         96%     6.6%     88%
+ *      C   dc                 37          6.0%        6.0%         83%     5.0%    100%
+ *      C   maryland           47          8.0%        9.1%         66%    11.2%    100%
+ *      C   fairfax            49          6.7%        6.7%         96%     6.6%     88%
  *
- * MARYLAND IS 10–12%, not 6.6% and not 9.5%. Two runs at n≈40 straddle about
- * ±1pp; the higher ships, because these are floors (below). It is displayed
+ * Run C is the governing one: it is the first with Maryland's subject lookup
+ * fixed (it had been straddling its own 8s timeout — see providers/maryland.ts)
+ * and the first where Rockville contributed, so it has the largest Maryland
+ * sample. Note Maryland's `exact` went 88% -> 100%: the two-phase lookup does
+ * not merely succeed more often, it resolves the RIGHT parcel every time.
+ *
+ * A PREDICTION THAT WAS WRONG, RECORDED BECAUSE IT WAS WRONG. Fixing the lookup
+ * was expected to raise Maryland's publish rate, on the theory that timeouts
+ * were suppressing coverage. It did not: 67%, 69%, 66% across the three runs.
+ * Coverage is limited by how many usable comps survive the lag, not by lookups
+ * failing. The fix bought correctness and reliability, not reach — only fresher
+ * data buys reach.
+ *
+ * MARYLAND IS 10–12%, not 6.6% and not 9.5%. Three runs at n=36–47 give 11.7%,
+ * 10.1% and 11.2%; the highest ships, because these are floors (below). It is displayed
  * rather than withheld BECAUSE it is honest: a wide measured band beats a
  * blank, and it is the figure a Bethesda homeowner actually receives.
  *
@@ -63,9 +79,10 @@
  * summary silently omitted it. `production-path-backtest.ts` now prints a
  * WHERE THE SAMPLE WENT table covering every market asked for, and a
  * jurisdiction with no rows says "contributed NOTHING" with the reason. Run B
- * is the first with Fairfax actually in it. Note `maryland/Rockville` failed
- * the pool fetch in both runs (iMAP timeout), so Maryland rests on Bethesda,
- * Frederick and Columbia.
+ * is the first with Fairfax in it; run C is the first with Rockville, whose
+ * pool fetch had failed twice on an iMAP timeout and been reported as a
+ * possible coverage hole. It is not one — it publishes 53%, the lowest of the
+ * four Maryland markets but far from dark.
  *
  * WHEN A FIGURE IS STILL WITHHELD, the UI shows the data's recency instead —
  * see `recencyLine`. That path remains live for any jurisdiction added without
@@ -180,9 +197,9 @@ export const JURISDICTION_ACCURACY: Record<string, AccuracyFigure> = {
     pct: 11.7,
     displayable: true,
     basis:
-      "production-path backtest run with a 90-day comp cutoff (`production-path-backtest.ts 25 90`), the publishing lag Maryland actually has. Two runs: 11.7% (n=44, 67% published) and 10.1% (n=36, 69% published). The higher is kept — they straddle ~1pp of sampling noise and every figure here is a floor",
+      "production-path backtest run with a 90-day comp cutoff (`production-path-backtest.ts 25 90`), the publishing lag Maryland actually has. Three runs: 11.7% (n=44), 10.1% (n=36) and 11.2% (n=47, the first on the fixed subject lookup and the largest sample). The highest is kept — they span ~1.6pp of sampling noise and every figure here is a floor. Publish rate 66–69% across all three; fixing the lookup did not move it",
     measuredUnderLagDays: 90,
-    sampleSize: 44,
+    sampleSize: 47,
     qualifier: "measured under Maryland's ~3-month reporting lag",
   },
 };

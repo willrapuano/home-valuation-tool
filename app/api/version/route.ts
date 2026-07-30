@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { hasAdvertisingIdentity, missingAgentConfig } from "@/lib/agent";
 
 /**
  * What is actually deployed here.
@@ -44,6 +45,15 @@ export function GET() {
      * prevent.
      */
     valuationMode: process.env.VALUATION_MODE ?? "instant",
-    market: process.env.NEXT_PUBLIC_AGENT_MARKET ?? "fairfax",
+    publicValuationMode: process.env.NEXT_PUBLIC_VALUATION_MODE ?? "instant",
+    market: process.env.NEXT_PUBLIC_AGENT_MARKET ?? null,
+    /**
+     * Branding variables that were never set. NEXT_PUBLIC_* bake at build time,
+     * so this is answerable only by the deployment itself — and a page missing
+     * its brokerage or licence is an advertising-registration problem in VA, MD
+     * and DC, not a cosmetic one.
+     */
+    missingAgentConfig: missingAgentConfig(),
+    hasAdvertisingIdentity: hasAdvertisingIdentity(),
   });
 }

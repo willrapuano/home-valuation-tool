@@ -46,7 +46,10 @@ interface Version {
   branch: string | null;
   environment: string;
   valuationMode: string;
-  market: string;
+  publicValuationMode?: string;
+  market: string | null;
+  missingAgentConfig?: string[];
+  hasAdvertisingIdentity?: boolean;
 }
 
 function expectedSha(): string {
@@ -112,7 +115,32 @@ async function main() {
       console.log(`\n✓ IN SYNC — ${got.sha?.slice(0, 7)} on ${got.branch}`);
       console.log(`  environment   ${got.environment}`);
       console.log(`  valuationMode ${got.valuationMode}`);
-      console.log(`  market        ${got.market}`);
+      console.log(`  market        ${got.market ?? "(unset — hero shows coverage panel)"}`);
+
+      // Matching the SHA is necessary and not sufficient. NEXT_PUBLIC_* bake at
+      // build time, so the right commit can still be serving the wrong tenant.
+      const problems: string[] = [];
+      if (got.missingAgentConfig?.length) {
+        problems.push(`unset branding: ${got.missingAgentConfig.join(", ")}`);
+      }
+      if (got.hasAdvertisingIdentity === false) {
+        problems.push("no brokerage or licence on the page — advertising-registration risk");
+      }
+      if (
+        got.publicValuationMode !== undefined &&
+        got.publicValuationMode !== got.valuationMode
+      ) {
+        problems.push(
+          `VALUATION_MODE (${got.valuationMode}) disagrees with ` +
+            `NEXT_PUBLIC_VALUATION_MODE (${got.publicValuationMode}) — the lead gate ` +
+            `will promise the wrong thing`
+        );
+      }
+      if (problems.length) {
+        console.error(`\n✗ RIGHT COMMIT, WRONG CONFIGURATION`);
+        for (const p of problems) console.error(`  - ${p}`);
+        process.exit(1);
+      }
       return;
     }
   }
