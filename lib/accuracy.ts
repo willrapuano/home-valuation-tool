@@ -112,7 +112,7 @@
  * prices it.
  *
  * AND NO DIAL IS A FIX. The best of them recovers a fifth of the starved third
- * even at triple the radius. These subjects do not have comps at any defensible
+ * even at double the radius. These subjects do not have comps at any defensible
  * setting, which is what "median of one surviving comp" already implied.
  *
  * WHO STARVES:
