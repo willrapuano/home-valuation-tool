@@ -77,6 +77,40 @@ production issues one. With retries, upstream errors go to 0% and the figure is
 source is flaky under load" and "this source cannot value this home" are
 different problems.
 
+### How much of a market's error is its transactions, not the code
+
+Bethesda is the worst market in the tool on both coverage and accuracy. Most of
+that turns out to be a property of its sales, not of the valuation.
+
+Maryland and Fairfax publish no arm's-length flag, so a holdout drawn straight
+from the sales record contains intra-family transfers, distressed sales and
+nominal conveyances. Those are not market value, and scoring an estimate
+against them measures a failure to predict a non-market number. The engine
+already refuses such sales *as comps* via `assessmentRatioBand`; nothing
+applied the same standard to the holdout. `scripts/holdout-quality.ts`:
+
+| | share with a plausible sale/assessment ratio | all holdouts | plausible only |
+|---|---|---|---|
+| Bethesda | 81% | 18.7% | **8.2%** |
+| Rockville | 92% | 6.6% | **5.1%** |
+
+Bethesda carries more than twice Rockville's share of implausible sales, which
+is most of the difference between them.
+
+**The filter is circular, so this is a bracket and not a number.** "Plausible"
+means the sale is close to its own assessment, and the engine's estimate is
+largely *driven* by that assessment — the strongest single input, worth 3.1pp.
+Filtering this way keeps the sales the engine was always going to get right, so
+8.2% is optimistic by construction in a way no adjustment can remove.
+
+The honest statement: Bethesda's accuracy on genuine arm's-length sales is
+somewhere between 8.2% and 18.7%, and public Maryland data cannot narrow it.
+DC can be measured properly because DC publishes the qualified flag. That is a
+second, independent reason to want deed-type data — beyond the coverage
+argument for Arlington and Loudoun.
+
+Do not "fix" a market's numbers by filtering its holdout.
+
 ### Coverage varies more by market than by jurisdiction
 
 | market | published |
