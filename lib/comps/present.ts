@@ -120,13 +120,27 @@ function publicAddress(raw: string, resolved?: string): string {
  */
 const KEEP_UPPER = new Set(["NE", "NW", "SE", "SW", "N", "S", "E", "W", "US", "DC"]);
 
+/**
+ * An ordinal street number: 5TH, 3RD, 14TH.
+ *
+ * These used to fall under the leave-digits-alone rule and came out as
+ * "17 5TH St SE". That rule is right for "0402", "8805" and "1-A", where case
+ * either does not apply or upper is correct — but an ordinal suffix is
+ * ordinary English, and DC is full of numbered streets, so the exception shows
+ * up constantly. Shouting at a homeowner is the exact thing this function
+ * exists to stop.
+ */
+const ORDINAL = /^(\d+)(ST|ND|RD|TH)$/i;
+
 export function titleCase(input: string): string {
   return input
     .split(/\s+/)
     .map(word => {
       const bare = word.replace(/[^A-Za-z]/g, "");
       if (KEEP_UPPER.has(bare.toUpperCase())) return word.toUpperCase();
-      // Leave anything with digits alone: "8805", "3RD", "1-A".
+      const ordinal = word.match(ORDINAL);
+      if (ordinal) return `${ordinal[1]}${ordinal[2].toLowerCase()}`;
+      // Leave anything else containing digits alone: "8805", "1-A", "0402".
       if (/\d/.test(word)) return word.toUpperCase();
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })

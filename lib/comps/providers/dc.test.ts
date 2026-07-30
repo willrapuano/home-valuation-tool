@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conditionFromCndtn, parseDcDate, propertyTypeFromProptype } from "./dc";
+import { conditionFromCndtn, parseDcDate, propertyTypeFromProptype, streetAddress } from "./dc";
 
 /**
  * DC field parsing. Each of these is a mapping that fails silently rather than
@@ -80,5 +80,41 @@ describe("propertyTypeFromProptype", () => {
     expect(propertyTypeFromProptype("Store-Miscellaneous")).toBe("other");
     expect(propertyTypeFromProptype("")).toBe("other");
     expect(propertyTypeFromProptype(null)).toBe("other");
+  });
+});
+
+describe("streetAddress", () => {
+  /**
+   * DC stores the whole address in one field, so its comps read
+   * "501 SEWARD SQUARE SE WASHINGTON DC 20003" beside Fairfax's
+   * "1205 Suffield Dr". The tail is redundant next to a report already headed
+   * with the subject's city, and the shared report pays for it twice by
+   * packing these into a length-budgeted URL.
+   */
+  it("drops the city, state and ZIP DC appends", () => {
+    expect(streetAddress("501 SEWARD SQUARE SE WASHINGTON DC 20003")).toBe("501 SEWARD SQUARE SE");
+    expect(streetAddress("409 CONSTITUTION AVE NE WASHINGTON DC 20002")).toBe("409 CONSTITUTION AVE NE");
+  });
+
+  it("handles a missing or extended ZIP", () => {
+    expect(streetAddress("128 D ST SE WASHINGTON DC")).toBe("128 D ST SE");
+    expect(streetAddress("128 D ST SE WASHINGTON DC 20003-1234")).toBe("128 D ST SE");
+  });
+
+  it("keeps a street named after a state", () => {
+    // Anchored to the end, so "Virginia Ave" is never mistaken for a suffix.
+    expect(streetAddress("1200 VIRGINIA AVE SE WASHINGTON DC 20003")).toBe("1200 VIRGINIA AVE SE");
+    expect(streetAddress("1200 VIRGINIA AVE SE")).toBe("1200 VIRGINIA AVE SE");
+  });
+
+  it("never reduces an address to nothing", () => {
+    // A general city/state/ZIP regex was tried first and turned a valid
+    // Maryland address into its house number. Degrade to noisy, never to empty.
+    expect(streetAddress("WASHINGTON DC 20003")).toBe("WASHINGTON DC 20003");
+  });
+
+  it("passes through the empty and the absent", () => {
+    expect(streetAddress("")).toBeUndefined();
+    expect(streetAddress(null)).toBeUndefined();
   });
 });

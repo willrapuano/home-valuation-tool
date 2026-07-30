@@ -159,6 +159,32 @@ function num(value: unknown): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/**
+ * PREMISEADD carries the whole address in one field:
+ *
+ *   "501 SEWARD SQUARE SE WASHINGTON DC 20003"
+ *
+ * Beside a report already headed with the subject's own city, and beside
+ * Fairfax's "1205 Suffield Dr" and Maryland's "437 Winding Rose Dr", that tail
+ * is noise on every row — and it is charged twice, because the shared report
+ * packs these addresses into a URL with a length budget.
+ *
+ * Stripped HERE rather than in the presentation layer, because this is the one
+ * place the format is known. A general "remove the city, state and ZIP" regex
+ * was tried first and turned "7207 Statecrest Dr Silver Spring MD 20910" into
+ * "7207" — truncating an address to its house number is a worse bug than the
+ * noise it removes. DC is a single city, so the suffix is a fixed string.
+ */
+const DC_ADDRESS_TAIL = /\s+WASHINGTON\s+DC(\s+\d{5}(?:-\d{4})?)?\s*$/i;
+
+export function streetAddress(value: unknown): string | undefined {
+  const full = str(value);
+  if (!full) return undefined;
+  const street = full.replace(DC_ADDRESS_TAIL, "").trim();
+  // Never reduce an address to nothing; a noisy row beats an empty one.
+  return street.length >= 4 ? street : full;
+}
+
 function str(value: unknown): string | undefined {
   const s = String(value ?? "").trim();
   return s && s.toLowerCase() !== "null" ? s : undefined;
@@ -319,7 +345,7 @@ export class DcProvider implements CompsProvider {
 
       latest.set(ssl, {
         id: `${ssl}@${soldDate}`,
-        address: str(a.PREMISEADD) ?? ssl,
+        address: streetAddress(a.PREMISEADD) ?? ssl,
         location,
         soldPrice,
         soldDate,

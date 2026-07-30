@@ -107,9 +107,23 @@ describe("titleCase", () => {
     expect(titleCase("1604 D ST SE WASHINGTON DC 20003")).toBe("1604 D St SE Washington DC 20003");
   });
 
-  it("leaves words containing digits untouched", () => {
-    // "3RD" must not become "3rd"; the rest of the line still normalises.
-    expect(titleCase("123 3RD ST NW")).toBe("123 3RD St NW");
+  it("lowercases ordinal street numbers", () => {
+    // "17 5TH St SE" shouts, and DC is full of numbered streets. The
+    // leave-digits-alone rule below is right for parcel numbers and unit
+    // designators; an ordinal suffix is ordinary English.
+    expect(titleCase("123 3RD ST NW")).toBe("123 3rd St NW");
+    expect(titleCase("17 5TH ST SE")).toBe("17 5th St SE");
+    expect(titleCase("1400 14TH ST NW")).toBe("1400 14th St NW");
+    expect(titleCase("201 1ST ST NE")).toBe("201 1st St NE");
+    expect(titleCase("52 2ND ST SW")).toBe("52 2nd St SW");
+  });
+
+  it("leaves other words containing digits untouched", () => {
+    // Parcel numbers and unit designators, where case does not apply or
+    // upper is correct. Only the ordinal suffix is an exception.
+    expect(titleCase("8805 WANDERING TRAIL DR APT 1-A")).toBe("8805 Wandering Trail Dr Apt 1-A");
+    expect(titleCase("1200 N NASH ST 1108")).toBe("1200 N Nash St 1108");
+    expect(titleCase("0311 17 0027")).toBe("0311 17 0027");
   });
 
   it("survives an address that is really a parcel id", () => {
@@ -156,3 +170,4 @@ describe("comps with no published address", () => {
     expect(c.address).toBe("1205 Suffield Dr");
   });
 });
+
