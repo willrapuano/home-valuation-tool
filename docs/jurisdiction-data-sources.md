@@ -75,6 +75,42 @@ building characteristics. 59% of recent DC sales are marked unqualified —
 foreclosures, intra-family transfers, deeds in lieu. Elsewhere
 `assessmentRatioBand()` guesses at these from sale-to-assessment ratios.
 
+## Finding the subject: containment, not proximity
+
+Every provider must answer "which parcel is this?" from a geocoded point, and
+DC and Maryland both got it wrong in a way nothing detected for weeks.
+
+Both issued a single radius query at 0.1 miles with `resultRecordCount: 40` and
+no ordering, then picked the nearest of whatever came back. **DC packs 159–340
+parcels into that radius.** ArcGIS returned an arbitrary page of 40, and the
+parcel the point actually sits in was usually not among them — measured on
+Capitol Hill at **9 of 10 properties resolving to a different house**.
+
+Nothing errored. Each lookup returned a complete, plausible subject carrying a
+neighbour's living area, bedrooms, year built and assessment. Measured against
+actual sale prices on 27 DC holdouts:
+
+| subject taken from | MdAPE |
+|---|---|
+| the property's own sales record | **10.1%** |
+| old lookup (radius, page of 40) | **23.0%** |
+| new lookup (containment first) | **10.1%** |
+
+The bug more than doubled DC's error, and the confidence label barely moved —
+so homeowners were shown confident-looking estimates for someone else's house.
+The fix restores accuracy exactly to what the sales record gives.
+
+**No backtest could have caught this.** Every backtest builds the subject from
+the sales record and never calls `lookupSubject` at all. It is only visible by
+comparing the two against live data, which is now what
+`lib/comps/providers/subject-lookup.test.ts` pins in structure.
+
+Omitting `distance` makes the query a point-in-polygon test: the containing
+parcel comes back, or nothing does. Widening is the genuine fallback for a
+geocode landing on a street centreline, and the widened rungs now request
+enough records that "nearest" is really the nearest. Fairfax always did it this
+way, which is why Fairfax was unaffected.
+
 ## Publishing lag — measured 2026-07-29
 
 How current each source is matters as much as how complete it is, and they
