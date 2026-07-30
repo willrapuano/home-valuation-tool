@@ -70,10 +70,39 @@
  * which is a large gain, and it is not evidence that more Maryland visitors
  * would see a number.
  *
- * What DOES bound coverage is unmeasured: the confidence gate rejecting because
- * the nearby sales are too few or too dissimilar, which is a density and
- * heterogeneity property of those markets rather than a freshness one. Do not
- * quote a coverage improvement from fresh data until something measures it.
+ * WHAT DOES BOUND COVERAGE, NOW MEASURED. Maryland's 34% non-publish splits
+ * into two causes, and they are not the same size:
+ *
+ *     published        66%
+ *     no estimate      23%   DENSITY — fewer than minCompCount usable comps
+ *     low confidence   11%   DISPERSION — comps disagree too much
+ *
+ * (Independently reproduces run C's 66 / 22 / 12 on a separate sample of 65.)
+ *
+ * RESOLUTION CONTRIBUTES NOTHING: run C resolved the exact parcel 100% of the
+ * time. Density is roughly twice dispersion, and among failing subjects the
+ * median number of surviving comps is ONE, against a minimum of three — these
+ * are starved, not marginal.
+ *
+ * Which knockout starves them, counted over the failing subjects:
+ *
+ *     1217  property type mismatch
+ *      923  distance > 1.5mi
+ *      467  sale/assessment ratio outlier
+ *      368  size ratio outside 0.65-1.5
+ *      170  adjustment grid too large
+ *
+ * PROPERTY-TYPE HETEROGENEITY IS THE BINDING CONSTRAINT, not radius and not
+ * freshness. Montgomery is 18.4% condos against 73.9% detached, so a mixed
+ * block offers many nearby sales that `isSubstitutable` will not let value the
+ * subject. That is a third independent reason fresh records would not move
+ * coverage.
+ *
+ * The dial that WOULD move it is substitutability, and it is paid for in
+ * accuracy: admitting condo sales as comps for a house buys published estimates
+ * by making them worse. Anyone reaching for it should measure the trade rather
+ * than assume it, and should weigh it against mailed mode — the third who see
+ * no number are that path's designed constituency.
  *
  * (`lag-cost.ts` shows a `valued` column falling 93% -> 73% with lag. That is
  * NOT this quantity: it is pooled across all three jurisdictions, and it counts
