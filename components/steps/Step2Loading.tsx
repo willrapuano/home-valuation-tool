@@ -15,11 +15,11 @@ interface Props {
  * does — it does not search MLS or BrightMLS records.
  */
 const LOADING_STEPS = [
-  "Verifying address...",
-  "Looking up property records...",
-  "Checking recent area sales...",
-  "Estimating rental potential...",
-  "Preparing your estimate...",
+  "Matching your address to a parcel record",
+  "Reading the assessment and last recorded sale",
+  "Pulling arm's-length sales within a mile",
+  "Ranking them by distance, recency and similarity",
+  "Adjusting each one toward your home",
 ];
 
 /**
@@ -122,57 +122,61 @@ export default function Step2Loading({ address, sqft, onComplete, onAddressRejec
     };
   }, [address, sqft, onComplete, onAddressRejected]);
 
+  const streetLine =
+    `${address.streetNumber} ${address.streetName}`.trim() || address.full;
+
   return (
-    <div className="animate-fade-in text-center">
-      <div className="glass rounded-2xl p-10 gold-border">
-        {/* Animated house icon */}
-        <div className="relative mx-auto w-24 h-24 mb-8">
-          <div className="absolute inset-0 rounded-full bg-gold/10 animate-ping" />
-          <div className="absolute inset-2 rounded-full bg-gold/10 animate-ping [animation-delay:300ms]" />
-          <div className="relative w-full h-full rounded-full bg-navy border-2 border-gold/50 flex items-center justify-center">
-            <svg
-              width="44"
-              height="44"
-              viewBox="0 0 24 24"
-              fill="none"
-              className="text-gold"
-            >
-              <path
-                d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                fill="rgba(201,168,76,0.15)"
-              />
-              <polyline
-                points="9,22 9,12 15,12 15,22"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-            </svg>
-          </div>
-        </div>
+    <div className="animate-fade-in max-w-xl">
+      <p className="eyebrow mb-4">Step 2 of 4</p>
+      <h2 className="font-serif text-3xl text-ink">Comparing recent sales</h2>
+      <p className="mt-2 text-ink-muted">
+        {streetLine}
+        {address.city ? `, ${address.city}` : ""} {address.state} {address.zipCode}
+      </p>
 
-        <h2 className="text-2xl font-bold text-white mb-2">Analyzing Your Home</h2>
-        <p className="text-white/50 text-sm mb-2 max-w-xs mx-auto">
-          {address.streetNumber} {address.streetName},{" "}
-          {address.city}, {address.state} {address.zipCode}
-        </p>
-
-        {/* Loading step text */}
-        <div className="h-6 mb-6">
-          <p className="text-gold/80 text-sm font-medium transition-all duration-300 animate-pulse">
-            {LOADING_STEPS[currentStep] ?? "Finalizing..."}
-          </p>
-        </div>
-
-        {/* Progress bar */}
-        <div className="w-full max-w-xs mx-auto bg-white/10 rounded-full h-2 overflow-hidden mb-4">
+      <div className="mt-8">
+        <div
+          className="w-full bg-rule rounded-full h-1.5 overflow-hidden"
+          role="progressbar"
+          aria-valuenow={progress}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Valuation progress"
+        >
           <div
-            className="h-full gold-gradient rounded-full transition-all duration-300 ease-out"
+            className="h-full bg-navy rounded-full transition-all duration-300 ease-out"
             style={{ width: `${progress}%` }}
           />
         </div>
-        <p className="text-white/30 text-xs">{progress}% complete</p>
+
+        {/*
+          The steps are listed rather than swapped one at a time, so the visitor
+          can see what is actually being done and what is left. A single rotating
+          line reads as a stall; a checklist reads as work.
+        */}
+        <ol className="mt-7 space-y-3.5">
+          {LOADING_STEPS.map((label, i) => {
+            const done = i < currentStep;
+            const active = i === currentStep;
+            return (
+              <li key={label} className="flex items-center gap-3 text-[15px]">
+                <span
+                  aria-hidden="true"
+                  className={`w-5 h-5 shrink-0 rounded-full border flex items-center justify-center text-[10px] font-semibold ${
+                    done
+                      ? "bg-navy border-navy text-white"
+                      : active
+                      ? "border-navy text-navy"
+                      : "border-rule text-ink-faint"
+                  }`}
+                >
+                  {done ? "✓" : ""}
+                </span>
+                <span className={done || active ? "text-ink" : "text-ink-faint"}>{label}</span>
+              </li>
+            );
+          })}
+        </ol>
       </div>
     </div>
   );

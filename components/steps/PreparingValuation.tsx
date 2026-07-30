@@ -1,14 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 import { AddressData, LeadData, ValuationData } from "../HomeValuationFlow";
+import { agent, agentFirstName } from "@/lib/agent";
 
 interface Props {
   address: AddressData;
   valuation: ValuationData;
   lead: LeadData;
   onStartOver: () => void;
+}
+
+function formatCurrency(n: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(n);
 }
 
 /**
@@ -59,11 +67,8 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
     setConfirmed(true);
   };
 
-  const CMA_SUBJECT = encodeURIComponent(`CMA Request — ${address.full}`);
-  const CMA_BODY = encodeURIComponent(
-    `Hi Candee,\n\nI'd like a comparative market analysis for ${address.full}.\n\nEmail: ${lead.email}\n\nThank you!`
-  );
-  const CMA_URL = `mailto:ccurrie@ttrsir.com?subject=${CMA_SUBJECT}&body=${CMA_BODY}`;
+  const TEL = `tel:${agent.phone.replace(/[^\d+]/g, "")}`;
+  const streetLine = `${address.streetNumber} ${address.streetName}`.trim() || address.full;
 
   const COVERS = [
     {
@@ -85,106 +90,90 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
   ];
 
   return (
-    <div className="animate-slide-up space-y-5 w-full">
-      {/* Hero — property image + commitment, no number */}
-      <div className="relative rounded-2xl overflow-hidden gold-border">
-        {!imgError ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={streetViewUrl}
-            alt={`Street view of ${address.full}`}
-            className="w-full h-52 md:h-64 object-cover"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <div className="w-full h-52 md:h-64 bg-gradient-to-br from-navy via-[#0d2448] to-[#0B1D3A] flex items-center justify-center">
-            <div className="text-4xl">🏡</div>
-          </div>
-        )}
+    <div className="animate-fade-in w-full">
+      <header>
+        <p className="eyebrow">{mailed ? "Report in preparation" : "Being prepared by hand"}</p>
+        <h2 className="mt-3 font-serif text-4xl md:text-[2.75rem] leading-[1.1] text-ink">
+          {mailed
+            ? "Your valuation report is on its way"
+            : "Your valuation is being prepared personally"}
+        </h2>
+        <p className="mt-4 text-lg text-ink">{streetLine}</p>
+        <p className="text-ink-muted">
+          {address.city}
+          {address.city ? ", " : ""}
+          {address.state} {address.zipCode}
+        </p>
 
-        <div className="absolute inset-0 bg-gradient-to-t from-navy via-navy/70 to-transparent" />
-
-        <div className="absolute bottom-0 left-0 right-0 p-5 md:p-7">
-          <div className="inline-flex items-center gap-2 bg-gold/15 border border-gold/40 text-gold text-xs font-semibold px-3 py-1.5 rounded-full mb-3 uppercase tracking-widest">
-            <span className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
-            In progress
-          </div>
-          <h2 className="text-2xl md:text-3xl font-bold text-white leading-tight mb-2">
-            {mailed ? "Your valuation report is on its way" : "Your valuation is being prepared"}
-          </h2>
-          <p className="text-white font-semibold text-sm">
-            {address.streetNumber} {address.streetName}
-            <span className="text-white/40 font-normal ml-2">
-              {address.city}, {address.state} {address.zipCode}
-            </span>
-          </p>
-        </div>
-      </div>
-
-      {/* What Candee is doing */}
-      <div className="glass rounded-2xl p-5 md:p-6 gold-border">
-        <p className="text-white/70 text-sm leading-relaxed mb-5">
+        <p className="mt-5 text-[15px] leading-relaxed text-ink-muted max-w-2xl">
           {mailed ? (
             <>
-              Candee is preparing a full valuation report for {address.streetNumber}{" "}
-              {address.streetName} and will mail it to you for review — prepared by hand
-              from the sales below, not generated automatically.
+              {agent.name} is preparing a full valuation report for {streetLine} and will mail
+              it to you for review — built by hand from the sales below rather than generated
+              automatically.
             </>
           ) : (
             <>
-              Candee is personally reviewing recent sales near your home. You&apos;ll have a
-              full comparative market analysis within 24 hours — prepared by hand, not
-              generated automatically.
+              There were not enough comparable sales on public record near this address to
+              publish a figure worth trusting, so no number is being shown. {agent.name} is
+              reviewing the area personally and you will have a full comparative market
+              analysis within 24 hours.
             </>
           )}
         </p>
+      </header>
 
-        <div className="grid sm:grid-cols-2 gap-4">
+      {!imgError && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={streetViewUrl}
+          alt={`Street view of ${address.full}`}
+          className="mt-8 w-full h-52 md:h-64 object-cover rounded-lg border border-rule"
+          onError={() => setImgError(true)}
+        />
+      )}
+
+      {/* ── What arrives ───────────────────────────────────────────── */}
+      <section className="mt-10">
+        <h3 className="font-serif text-2xl text-ink">What the analysis covers</h3>
+        <dl className="mt-5 grid sm:grid-cols-2 gap-x-10 gap-y-6">
           {COVERS.map(item => (
-            <div key={item.title} className="flex gap-3">
-              <svg
-                className="w-4 h-4 text-gold shrink-0 mt-0.5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                viewBox="0 0 24 24"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <div>
-                <p className="text-white font-semibold text-sm">{item.title}</p>
-                <p className="text-white/45 text-xs mt-0.5 leading-relaxed">{item.body}</p>
-              </div>
+            <div key={item.title} className="border-t border-rule pt-4">
+              <dt className="text-[15px] font-medium text-ink">{item.title}</dt>
+              <dd className="mt-1 text-sm leading-relaxed text-ink-muted">{item.body}</dd>
             </div>
           ))}
-        </div>
+        </dl>
+      </section>
 
-        <div className="flex flex-col sm:flex-row gap-3 mt-6">
-          {confirmed ? (
-            <div className="flex-1 bg-gold/10 border border-gold/30 rounded-xl px-4 py-3">
-              <p className="text-gold text-sm font-semibold">✓ Request confirmed</p>
-              <p className="text-white/60 text-xs mt-1">
-                {mailed
-                  ? `Your report is being prepared and will be mailed to ${address.streetNumber} ${address.streetName}.`
-                  : `Candee will be in touch at ${lead.email} within 24 hours.`}
-              </p>
-            </div>
-          ) : (
+      {/* ── Actions ────────────────────────────────────────────────── */}
+      <div className="mt-8">
+        {confirmed ? (
+          <div className="card rounded-md px-5 py-4">
+            <p className="text-[15px] text-ink font-medium">Request confirmed</p>
+            <p className="mt-1 text-[15px] text-ink-muted">
+              {mailed
+                ? `Your report is being prepared and will be posted to ${streetLine}.`
+                : `${agentFirstName} will be in touch at ${lead.email} within 24 hours.`}
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={handleConfirm}
               disabled={loading}
-              className="flex-1 gold-gradient text-navy font-bold py-4 rounded-xl text-sm transition-all hover:opacity-90 disabled:opacity-60 shadow-lg shadow-gold/20"
+              className="h-12 inline-flex items-center px-6 bg-navy hover:bg-navy-light text-white font-semibold rounded-md text-[15px] transition-colors disabled:opacity-60"
             >
-              {loading ? "Confirming..." : "Confirm my request →"}
+              {loading ? "Confirming…" : "Confirm my request"}
             </button>
-          )}
-          <a
-            href="tel:+17032036005"
-            className="flex-1 bg-white/10 hover:bg-white/15 border border-white/20 text-white font-semibold py-4 rounded-xl text-sm text-center transition-all"
-          >
-            📞 Call Candee now
-          </a>
-        </div>
+            <a
+              href={TEL}
+              className="h-12 inline-flex items-center px-6 border border-ink/25 hover:border-navy text-ink font-medium rounded-md text-[15px] transition-colors"
+            >
+              Call {agentFirstName} — {agent.phone}
+            </a>
+          </div>
+        )}
       </div>
 
       {/* The sales the posted report is built from.
@@ -194,85 +183,99 @@ export default function PreparingValuation({ address, valuation, lead, onStartOv
           are what an agent actually opens with — "here is what sold near you".
           The number follows on paper, reviewed by a person. */}
       {comps.length > 0 && (
-        <div className="glass rounded-2xl p-5 md:p-6 border border-white/10">
-          <p className="text-gold font-bold text-xs uppercase tracking-wider mb-1">
+        <section className="mt-12">
+          <h3 className="font-serif text-2xl text-ink">
             Recent sales near {address.streetName || "your home"}
-          </p>
-          <p className="text-white/40 text-xs mb-4">
-            Every one is public record. These are what the report is built from.
+          </h3>
+          <p className="mt-2 text-[15px] text-ink-muted max-w-2xl">
+            Every one is public record, and these are what the report is built from. Each
+            will be adjusted for how it differs from your home — size, condition, lot and
+            timing.
           </p>
 
-          <ul className="space-y-2">
-            {comps.slice(0, 5).map(c => (
-              <li
-                key={`${c.address}-${c.soldDate}`}
-                className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"
-              >
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-white/90 text-sm font-medium">{c.address}</span>
-                  <span className="text-white font-semibold text-sm whitespace-nowrap">
-                    {new Intl.NumberFormat("en-US", {
-                      style: "currency",
-                      currency: "USD",
-                      maximumFractionDigits: 0,
-                    }).format(c.soldPrice)}
-                  </span>
-                </div>
-                <p className="text-white/40 text-xs mt-1">
-                  {c.distanceMiles} mi away
-                  {" · "}
-                  {c.monthsAgo === 0 ? "sold this month" : `sold ${c.monthsAgo}mo ago`}
-                  {c.sqft ? ` · ${c.sqft.toLocaleString()} sqft` : ""}
-                  {c.beds ? ` · ${c.beds} bd` : ""}
-                </p>
-              </li>
-            ))}
-          </ul>
-
-          <p className="text-white/30 text-xs mt-3">
-            Your report adjusts each of these for how it differs from your home — size,
-            condition, lot and timing.
-          </p>
-        </div>
+          {/* "Sold" folds into the address subline below `sm` rather than
+              making the table scroll sideways off a phone screen. */}
+          <div className="mt-6 card rounded-lg overflow-hidden">
+            <table className="w-full text-[15px]">
+              <thead>
+                <tr className="bg-canvas border-b border-rule text-left">
+                  <th scope="col" className="font-medium text-ink-muted px-3 sm:px-5 py-3">
+                    Address
+                  </th>
+                  <th scope="col" className="hidden sm:table-cell font-medium text-ink-muted px-4 py-3">
+                    Sold
+                  </th>
+                  <th scope="col" className="font-medium text-ink-muted px-3 sm:px-5 py-3 text-right">
+                    Sale price
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {comps.slice(0, 6).map(c => (
+                  <tr key={`${c.address}-${c.soldDate}`} className="border-b border-rule last:border-0">
+                    <td className="px-3 sm:px-5 py-3.5">
+                      <span className="text-ink">{c.address || "Nearby home"}</span>
+                      <span className="block text-[13px] text-ink-faint mt-0.5 tnum">
+                        <span className="sm:hidden">
+                          {c.monthsAgo === 0 ? "This month" : `${c.monthsAgo} mo ago`} ·{" "}
+                        </span>
+                        {c.distanceMiles} mi
+                        {c.sqft ? ` · ${c.sqft.toLocaleString()} sqft` : ""}
+                        <span className="hidden sm:inline">
+                          {c.beds ? ` · ${c.beds} bd` : ""}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="hidden sm:table-cell px-4 py-3.5 text-ink-muted whitespace-nowrap tnum">
+                      {c.monthsAgo === 0 ? "This month" : `${c.monthsAgo} mo ago`}
+                    </td>
+                    <td className="px-3 sm:px-5 py-3.5 text-right text-ink font-medium tnum whitespace-nowrap">
+                      {formatCurrency(c.soldPrice)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
-      {/* Agent card */}
-      <div className="rounded-2xl p-6 border-2 border-gold/40 bg-gradient-to-br from-gold/10 to-navy">
-        <div className="flex flex-col md:flex-row gap-5 items-center md:items-start">
-          <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-gold/50 shrink-0">
-            <Image
-              src="/candee-headshot.png"
-              alt="Candee Currie"
-              fill
-              className="object-cover object-top"
-              sizes="80px"
-            />
-          </div>
-          <div className="flex-1 text-center md:text-left">
-            <p className="text-gold/80 text-xs uppercase tracking-widest font-semibold mb-0.5">
-              Your Local Expert
-            </p>
-            <h3 className="text-white font-bold text-lg">Candee Currie</h3>
-            <p className="text-white/50 text-sm">TTR Sotheby&apos;s International Realty</p>
-            <p className="text-white/30 text-xs mt-0.5">VA License 0225203164</p>
-            <div className="flex flex-col sm:flex-row gap-3 mt-3 justify-center md:justify-start">
-              <a href="tel:+17032036005" className="text-white/60 hover:text-gold transition-colors text-sm">
-                (703) 203-6005
+      {/* ── The agent ──────────────────────────────────────────────── */}
+      <section className="mt-12 pt-10 border-t border-rule">
+        <div className="grid sm:grid-cols-[auto_1fr] gap-6 items-start">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={agent.headshot}
+            alt={agent.name}
+            width={112}
+            height={112}
+            className="w-24 h-24 rounded-full object-cover object-top border border-rule"
+            onError={e => {
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+          <div>
+            <p className="eyebrow mb-2">Prepared by</p>
+            <h3 className="font-serif text-2xl text-ink">{agent.name}</h3>
+            <p className="mt-1 text-ink-muted">{agent.brokerage}</p>
+            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-[15px]">
+              <a href={TEL} className="text-navy font-medium hover:underline">
+                {agent.phone}
               </a>
-              <a href={CMA_URL} className="text-white/60 hover:text-gold transition-colors text-sm">
-                ccurrie@ttrsir.com
+              <a href={`mailto:${agent.email}`} className="text-navy font-medium hover:underline">
+                {agent.email}
               </a>
+              <span className="text-ink-faint text-sm">{agent.license}</span>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <button
-        onClick={onStartOver}
-        className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/50 font-medium py-3 rounded-xl text-sm transition-all"
-      >
-        Look up a different address
-      </button>
+      <div className="mt-10 pt-6 border-t border-rule">
+        <button onClick={onStartOver} className="text-sm font-medium text-navy hover:underline">
+          Look up a different address
+        </button>
+      </div>
     </div>
   );
 }

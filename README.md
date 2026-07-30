@@ -203,8 +203,27 @@ uptime monitor at `/api/health`, which returns 503 in that state.
 
 - **Framework:** Next.js 14 (App Router)
 - **Styling:** Tailwind CSS
-- **Brand:** Navy #0B1D3A + Gold #C9A84C (Sotheby's palette)
 - **Deploy:** Vercel
+
+### Design
+
+The pages follow the format the tools homeowners have already used converge on —
+Redfin, Zillow, Homebot, Opendoor: a plain-language question as the headline, one
+address field in the hero, and substance below the fold in the order accuracy →
+method → who prepared it → questions. Contact details are asked for once, at step
+3, and never in the hero.
+
+Colours are semantic tokens, not literal ones. `bg-paper`, `bg-canvas`,
+`text-ink`, `text-ink-muted`, `border-rule` are defined once in
+`app/globals.css` and mapped in `tailwind.config.ts`; navy is the button and
+footer ink, gold is a hairline accent and never body text on a light surface
+(`#C9A84C` on white is about 2:1 contrast — use `gold-deep` if a gold-toned word
+is genuinely wanted). Headlines are set in Source Serif, body in Inter.
+
+The landing page is a server component with `revalidate = 3600`. It reads live
+Fairfax County sale counts through `lib/market-pulse.ts`, which has a hard
+timeout and returns `null` on any failure — the hero then renders a coverage
+panel instead. Nothing on the page is allowed to block or fail the render.
 
 ---
 
